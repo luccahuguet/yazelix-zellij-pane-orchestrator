@@ -1,0 +1,5 @@
+[profile.default]
+fail-fast = true
+
+[profile.ci]
+fail-fast = false
