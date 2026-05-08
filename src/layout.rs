@@ -1,8 +1,8 @@
 use std::thread::sleep;
 use std::time::Duration;
 
-use yazelix_pane_orchestrator::pane_contract::FocusContextPolicy;
-use yazelix_pane_orchestrator::sidebar_contract::{
+use yazelix_zellij_pane_orchestrator::pane_contract::FocusContextPolicy;
+use yazelix_zellij_pane_orchestrator::sidebar_contract::{
     resolve_sidebar_hide, resolve_sidebar_visibility_toggle, sidebar_close_swap_steps,
     sidebar_post_layout_focus_nudges, SidebarFocusNudgeDirection, SidebarPostLayoutFocus,
     SidebarVisibilityAction,

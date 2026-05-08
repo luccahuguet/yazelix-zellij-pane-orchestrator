@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use yazelix_pane_orchestrator::status_bar_cache_contract::{
+use yazelix_zellij_pane_orchestrator::status_bar_cache_contract::{
     resolve_status_bar_cache_runtime, StatusBarCacheRuntime,
 };
 use zellij_tile::prelude::*;

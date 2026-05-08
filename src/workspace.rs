@@ -9,7 +9,7 @@ use zellij_tile::prelude::*;
 use crate::panes::pane_id_to_string;
 use crate::sidebar_yazi::SidebarYaziState;
 use crate::{State, COMMAND_STEP_DELAY_MS, RESULT_INVALID_PAYLOAD, RESULT_MISSING, RESULT_OK};
-use yazelix_pane_orchestrator::editor_open_contract::build_editor_change_directory_command;
+use yazelix_zellij_pane_orchestrator::editor_open_contract::build_editor_change_directory_command;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WorkspaceState {

@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use yazelix_pane_orchestrator::runtime_config_contract::{
+use yazelix_zellij_pane_orchestrator::runtime_config_contract::{
     decode_runtime_config_reload, PaneOrchestratorRuntimeConfig, RuntimeConfigReloadError,
 };
 use zellij_tile::prelude::*;

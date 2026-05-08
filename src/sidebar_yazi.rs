@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use yazelix_pane_orchestrator::sidebar_state_contract::{
+use yazelix_zellij_pane_orchestrator::sidebar_state_contract::{
     find_tab_for_sidebar_pane_id, retain_tab_local_sidebar_pane_state,
 };
 use zellij_tile::prelude::*;

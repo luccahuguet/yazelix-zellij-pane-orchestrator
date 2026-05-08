@@ -8,7 +8,7 @@ use crate::panes::ManagedPaneKind;
 use crate::{
     State, COMMAND_STEP_DELAY_MS, RESULT_INVALID_PAYLOAD, RESULT_OK, RESULT_UNSUPPORTED_EDITOR,
 };
-use yazelix_pane_orchestrator::editor_open_contract::{
+use yazelix_zellij_pane_orchestrator::editor_open_contract::{
     build_editor_change_directory_command, build_editor_command_sequence,
     normalize_open_file_targets, EditorCommandSequenceError,
 };

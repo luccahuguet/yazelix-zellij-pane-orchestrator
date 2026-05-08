@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
-use yazelix_pane_orchestrator::active_tab_session_state::SessionAiPaneActivity;
-use yazelix_pane_orchestrator::active_tab_session_state::SessionAiPaneActivityState;
-use yazelix_pane_orchestrator::ai_pane_activity_contract::{
+use yazelix_zellij_pane_orchestrator::active_tab_session_state::SessionAiPaneActivity;
+use yazelix_zellij_pane_orchestrator::active_tab_session_state::SessionAiPaneActivityState;
+use yazelix_zellij_pane_orchestrator::ai_pane_activity_contract::{
     normalized_ai_activity_state, upsert_ai_pane_activity_fact, AiPaneActivityRegistration,
 };
 use zellij_tile::prelude::*;

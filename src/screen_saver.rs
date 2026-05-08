@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use yazelix_pane_orchestrator::screen_saver_contract::{
+use yazelix_zellij_pane_orchestrator::screen_saver_contract::{
     resolve_screen_saver_timer_plan, ScreenSaverTimerPlan,
 };
 use zellij_tile::prelude::*;

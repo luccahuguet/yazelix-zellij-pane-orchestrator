@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use yazelix_pane_orchestrator::orchestrator_heartbeat_contract::{
+use yazelix_zellij_pane_orchestrator::orchestrator_heartbeat_contract::{
     build_orchestrator_heartbeat_payload, OrchestratorHeartbeatPayload,
 };
 use zellij_tile::prelude::*;

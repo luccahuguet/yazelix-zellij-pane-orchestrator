@@ -1,22 +1,22 @@
 use std::collections::HashMap;
 
 use serde::Serialize;
-use yazelix_pane_orchestrator::active_tab_session_state::{
+use yazelix_zellij_pane_orchestrator::active_tab_session_state::{
     build_active_tab_session_state_v1, ActiveTabReadState, ActiveTabSessionStateV1,
     SessionSidebarYazi, SessionStatusExtensions, SessionTransientPane, SessionTransientPanes,
     SessionWorkspace,
 };
-use yazelix_pane_orchestrator::horizontal_focus_contract::{
+use yazelix_zellij_pane_orchestrator::horizontal_focus_contract::{
     resolve_horizontal_focus, HorizontalDirection, HorizontalFocusPlan, HorizontalPaneRole,
     HorizontalPaneSnapshot,
 };
-use yazelix_pane_orchestrator::pane_contract::{
+use yazelix_zellij_pane_orchestrator::pane_contract::{
     resolve_focus_context, select_managed_pane_index, FocusContextPolicy, PaneSnapshot,
 };
-use yazelix_pane_orchestrator::sidebar_contract::{
+use yazelix_zellij_pane_orchestrator::sidebar_contract::{
     resolve_sidebar_focus_toggle, SidebarFocusTogglePlan,
 };
-use yazelix_pane_orchestrator::transient_pane_contract::{
+use yazelix_zellij_pane_orchestrator::transient_pane_contract::{
     select_transient_pane, transient_pane_identity, TransientPaneKind, TransientPaneSnapshot,
 };
 use zellij_tile::prelude::*;
