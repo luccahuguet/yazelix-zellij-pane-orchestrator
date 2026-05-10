@@ -1,7 +1,7 @@
 // Test lane: default
 
 pub const ZJSTATUS_WORKSPACE_PIPE_MESSAGE: &str = "yazelix_workspace_status";
-pub const ZJSTATUS_WORKSPACE_PIPE_NAME: &str = "workspace";
+pub const ZJSTATUS_WORKSPACE_PIPE_NAME: &str = "pipe_workspace";
 
 pub fn workspace_pipe_protocol_payload(content: &str) -> String {
     format!(
@@ -23,7 +23,7 @@ mod tests {
     fn workspace_pipe_payload_sanitizes_protocol_content() {
         let payload = workspace_pipe_protocol_payload(" [foo::bar\nbaz]");
 
-        assert_eq!(payload, "zjstatus::pipe::workspace:: [foo:bar baz]");
+        assert_eq!(payload, "zjstatus::pipe::pipe_workspace:: [foo:bar baz]");
     }
 
     // Defends: an empty workspace label clears the active bar widget instead of preserving a stale tab name.
@@ -31,6 +31,6 @@ mod tests {
     fn empty_workspace_pipe_payload_clears_widget() {
         let payload = workspace_pipe_protocol_payload("");
 
-        assert_eq!(payload, "zjstatus::pipe::workspace::");
+        assert_eq!(payload, "zjstatus::pipe::pipe_workspace::");
     }
 }
