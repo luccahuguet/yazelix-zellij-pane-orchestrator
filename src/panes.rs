@@ -196,6 +196,32 @@ pub(crate) fn build_terminal_panes_by_tab(
         .collect()
 }
 
+pub(crate) fn build_zjstatus_plugin_id_by_tab(pane_manifest: &PaneManifest) -> HashMap<usize, u32> {
+    pane_manifest
+        .panes
+        .iter()
+        .filter_map(|(tab_position, panes)| {
+            panes
+                .iter()
+                .find(|pane| {
+                    pane.is_plugin
+                        && !pane.exited
+                        && pane
+                            .plugin_url
+                            .as_deref()
+                            .map(is_zjstatus_plugin_url)
+                            .unwrap_or(false)
+                })
+                .map(|pane| (*tab_position, pane.id))
+        })
+        .collect()
+}
+
+fn is_zjstatus_plugin_url(plugin_url: &str) -> bool {
+    let plugin_url = plugin_url.trim();
+    plugin_url == "zjstatus.wasm" || plugin_url.ends_with("/zjstatus.wasm")
+}
+
 impl State {
     fn collect_active_tab_read_state(
         &self,

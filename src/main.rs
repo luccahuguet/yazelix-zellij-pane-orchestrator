@@ -48,6 +48,7 @@ struct State {
     fallback_terminal_pane_by_tab: HashMap<usize, PaneId>,
     managed_panes_by_tab: HashMap<usize, ManagedTabPanes>,
     terminal_panes_by_tab: HashMap<usize, Vec<panes::TerminalPaneLayout>>,
+    zjstatus_plugin_id_by_tab: HashMap<usize, u32>,
     user_pane_count_by_tab: HashMap<usize, usize>,
     workspace_state_by_tab: HashMap<usize, WorkspaceState>,
     sidebar_yazi_state_by_tab: HashMap<usize, sidebar_yazi::SidebarYaziState>,
@@ -62,6 +63,7 @@ struct State {
     screen_saver_restore_floating_layer: bool,
     status_bar_cache_runtime: Option<StatusBarCacheRuntime>,
     status_bar_cache_last_payload: Option<String>,
+    workspace_status_pipe_payload_by_plugin: HashMap<u32, String>,
     status_bar_claude_usage_next_refresh: Option<Instant>,
     status_bar_codex_usage_next_refresh: Option<Instant>,
     status_bar_opencode_go_usage_next_refresh: Option<Instant>,
@@ -86,6 +88,7 @@ impl ZellijPlugin for State {
             PermissionType::RunCommands,
             PermissionType::WriteToStdin,
             PermissionType::ReadCliPipes,
+            PermissionType::MessageAndLaunchOtherPlugins,
             PermissionType::ReadSessionEnvironmentVariables,
         ]);
         self.runtime_dir = configuration
@@ -158,6 +161,14 @@ impl ZellijPlugin for State {
                 self.fallback_terminal_pane_by_tab =
                     panes::build_fallback_terminal_pane_by_tab(&pane_manifest);
                 self.terminal_panes_by_tab = panes::build_terminal_panes_by_tab(&pane_manifest);
+                self.zjstatus_plugin_id_by_tab =
+                    panes::build_zjstatus_plugin_id_by_tab(&pane_manifest);
+                self.workspace_status_pipe_payload_by_plugin
+                    .retain(|plugin_id, _| {
+                        self.zjstatus_plugin_id_by_tab
+                            .values()
+                            .any(|id| id == plugin_id)
+                    });
                 self.user_pane_count_by_tab = panes::build_user_pane_count_by_tab(&pane_manifest);
                 self.reconcile_sidebar_yazi_state();
                 self.reconcile_ai_pane_activity_panes();

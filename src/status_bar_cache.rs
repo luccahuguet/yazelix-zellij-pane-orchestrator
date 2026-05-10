@@ -4,8 +4,12 @@ use std::time::{Duration, Instant};
 use yazelix_zellij_pane_orchestrator::status_bar_cache_contract::{
     resolve_status_bar_cache_runtime, StatusBarCacheRuntime,
 };
+use yazelix_zellij_pane_orchestrator::status_bar_workspace_pipe_contract::{
+    workspace_pipe_protocol_payload, ZJSTATUS_WORKSPACE_PIPE_MESSAGE,
+};
 use zellij_tile::prelude::*;
 
+use crate::workspace::{tab_name_from_workspace_root, WorkspaceStateSource};
 use crate::State;
 
 const INITIAL_CLAUDE_USAGE_REFRESH_DELAY: Duration = Duration::from_secs(2);
@@ -31,6 +35,8 @@ impl State {
         let Some(active_tab_position) = self.active_tab_position else {
             return;
         };
+        self.publish_workspace_status_pipe(active_tab_position);
+
         let Ok(payload) =
             serde_json::to_string(&self.active_tab_session_state_snapshot(active_tab_position))
         else {
@@ -56,6 +62,53 @@ impl State {
         self.record_status_cache_write();
         run_command_with_env_variables_and_cwd(&command, runtime.env, runtime.cwd, BTreeMap::new());
         self.status_bar_cache_last_payload = Some(payload);
+    }
+
+    fn publish_workspace_status_pipe(&mut self, active_tab_position: usize) {
+        let Some(zjstatus_plugin_id) = self
+            .zjstatus_plugin_id_by_tab
+            .get(&active_tab_position)
+            .copied()
+        else {
+            return;
+        };
+        let payload = self.workspace_status_pipe_payload(active_tab_position);
+        if self
+            .workspace_status_pipe_payload_by_plugin
+            .get(&zjstatus_plugin_id)
+            .map(String::as_str)
+            == Some(payload.as_str())
+        {
+            return;
+        }
+
+        pipe_message_to_plugin(
+            MessageToPlugin::new(ZJSTATUS_WORKSPACE_PIPE_MESSAGE)
+                .with_destination_plugin_id(zjstatus_plugin_id)
+                .with_payload(payload.clone()),
+        );
+        self.workspace_status_pipe_payload_by_plugin
+            .insert(zjstatus_plugin_id, payload);
+    }
+
+    fn workspace_status_pipe_payload(&self, active_tab_position: usize) -> String {
+        workspace_pipe_protocol_payload(
+            self.workspace_status_label(active_tab_position)
+                .unwrap_or_default()
+                .as_str(),
+        )
+    }
+
+    fn workspace_status_label(&self, active_tab_position: usize) -> Option<String> {
+        let workspace_state = self.workspace_state_by_tab.get(&active_tab_position)?;
+        if workspace_state.source != WorkspaceStateSource::Explicit {
+            return None;
+        }
+
+        Some(format!(
+            " [{}]",
+            tab_name_from_workspace_root(&workspace_state.root)
+        ))
     }
 
     pub(crate) fn schedule_initial_status_bar_claude_usage_refresh(&mut self) {
