@@ -7,12 +7,19 @@ Standalone Zellij plugin for tab-local pane orchestration. The plugin originated
 ```bash
 cargo test --lib
 cargo build --target wasm32-wasip1 --profile release
+nix build .#yazelix_zellij_pane_orchestrator
 ```
 
 The public artifact is:
 
 ```text
 target/wasm32-wasip1/release/yazelix_zellij_pane_orchestrator.wasm
+```
+
+The Nix package artifact for Yazelix runtime integration is:
+
+```text
+share/yazelix_zellij_pane_orchestrator/yazelix_pane_orchestrator.wasm
 ```
 
 ## Minimal Zellij config
