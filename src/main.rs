@@ -1,3 +1,4 @@
+mod agent;
 mod ai_pane_activity;
 mod editor;
 mod heartbeat;
@@ -18,6 +19,9 @@ use std::time::Instant;
 use workspace::{bootstrap_workspace_root, WorkspaceState};
 use yazelix_zellij_pane_orchestrator::active_tab_session_state::SessionAiPaneActivity;
 use yazelix_zellij_pane_orchestrator::horizontal_focus_contract::HorizontalDirection;
+use yazelix_zellij_pane_orchestrator::layout_state_contract::{
+    LayoutFamilyDirection, LayoutVariant,
+};
 use yazelix_zellij_pane_orchestrator::screen_saver_contract::ScreenSaverConfig;
 use yazelix_zellij_pane_orchestrator::status_bar_cache_contract::StatusBarCacheRuntime;
 use yazelix_zellij_pane_orchestrator::timer_schedule_contract::next_timer_delay;
@@ -42,7 +46,7 @@ pub(crate) const SWAP_LAYOUT_STEP_DELAY_MS: u64 = 1;
 struct State {
     active_tab_position: Option<usize>,
     active_swap_layout_name_by_tab: HashMap<usize, Option<String>>,
-    last_known_layout_variant_by_tab: RefCell<HashMap<usize, layout::LayoutVariant>>,
+    last_known_layout_variant_by_tab: RefCell<HashMap<usize, LayoutVariant>>,
     focus_context_by_tab: HashMap<usize, FocusContext>,
     focused_terminal_pane_by_tab: HashMap<usize, PaneId>,
     fallback_terminal_pane_by_tab: HashMap<usize, PaneId>,
@@ -141,7 +145,7 @@ impl ZellijPlugin for State {
                         if let Some(layout_variant) = tab
                             .active_swap_layout_name
                             .as_deref()
-                            .and_then(layout::LayoutVariant::from_layout_name)
+                            .and_then(LayoutVariant::from_layout_name)
                         {
                             last_known_layout_variant_by_tab.insert(tab.position, layout_variant);
                         }
@@ -233,15 +237,19 @@ impl ZellijPlugin for State {
                 false
             }
             "next_family" => {
-                self.switch_layout_family(&pipe_message, layout::FamilyDirection::Next);
+                self.switch_layout_family(&pipe_message, LayoutFamilyDirection::Next);
                 false
             }
             "previous_family" => {
-                self.switch_layout_family(&pipe_message, layout::FamilyDirection::Previous);
+                self.switch_layout_family(&pipe_message, LayoutFamilyDirection::Previous);
                 false
             }
             "toggle_sidebar" => {
                 self.toggle_sidebar(&pipe_message);
+                false
+            }
+            "toggle_agent_sidebar" => {
+                self.toggle_agent_sidebar(&pipe_message);
                 false
             }
             "hide_sidebar" => {

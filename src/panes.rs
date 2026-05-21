@@ -29,6 +29,7 @@ use crate::{
 
 pub(crate) const EDITOR_TITLE: &str = "editor";
 pub(crate) const SIDEBAR_TITLE: &str = "sidebar";
+pub(crate) const AGENT_TITLE: &str = "agent";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ManagedTerminalPane {
@@ -53,6 +54,7 @@ pub(crate) struct TerminalPaneLayout {
 pub(crate) struct ManagedTabPanes {
     pub(crate) editor: Option<ManagedTerminalPane>,
     pub(crate) sidebar: Option<ManagedTerminalPane>,
+    pub(crate) agent: Option<ManagedTerminalPane>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -72,9 +74,11 @@ struct MaintainerDebugEditorState {
     workspace_root_source: Option<String>,
     editor_pane_id: Option<String>,
     sidebar_pane_id: Option<String>,
+    agent_pane_id: Option<String>,
     sidebar_yazi_id: Option<String>,
     sidebar_yazi_cwd: Option<String>,
     sidebar_is_collapsed: Option<bool>,
+    agent_is_collapsed: Option<bool>,
 }
 
 pub(crate) fn build_managed_panes_by_tab(
@@ -88,6 +92,7 @@ pub(crate) fn build_managed_panes_by_tab(
             ManagedTabPanes {
                 editor: select_managed_terminal_pane(panes, EDITOR_TITLE),
                 sidebar: select_managed_terminal_pane(panes, SIDEBAR_TITLE),
+                agent: select_managed_terminal_pane(panes, AGENT_TITLE),
             },
         );
     }
@@ -161,7 +166,9 @@ pub(crate) fn build_fallback_terminal_pane_by_tab(
                     panes
                         .iter()
                         .find(|pane| {
-                            !pane.is_plugin && !pane.exited && pane.title.trim() != SIDEBAR_TITLE
+                            !pane.is_plugin
+                                && !pane.exited
+                                && !matches!(pane.title.trim(), SIDEBAR_TITLE | AGENT_TITLE)
                         })
                         .map(|pane| (*tab_position, PaneId::Terminal(pane.id)))
                 })
@@ -278,6 +285,9 @@ impl State {
         let sidebar_pane = active_tab_position
             .and_then(|tab_position| self.managed_panes_by_tab.get(&tab_position))
             .and_then(|managed_tab_panes| managed_tab_panes.sidebar);
+        let agent_pane = active_tab_position
+            .and_then(|tab_position| self.managed_panes_by_tab.get(&tab_position))
+            .and_then(|managed_tab_panes| managed_tab_panes.agent);
         let sidebar_yazi_state = active_tab_position
             .and_then(|tab_position| self.get_active_sidebar_yazi_state_snapshot(tab_position));
         let transient_panes = build_session_transient_panes(
@@ -303,12 +313,15 @@ impl State {
             bootstrap_workspace,
             editor_pane_id: pane_id_to_string(editor_pane.map(|pane| pane.pane_id)),
             sidebar_pane_id: pane_id_to_string(sidebar_pane.map(|pane| pane.pane_id)),
+            agent_pane_id: pane_id_to_string(agent_pane.map(|pane| pane.pane_id)),
             sidebar_yazi: sidebar_yazi_state.map(|state| SessionSidebarYazi {
                 yazi_id: state.yazi_id.clone(),
                 cwd: state.cwd.clone(),
             }),
             sidebar_collapsed: active_tab_position
                 .and_then(|tab_position| self.sidebar_is_closed(tab_position)),
+            agent_collapsed: active_tab_position
+                .and_then(|tab_position| self.agent_is_closed(tab_position)),
             focus_context: focus_context.to_string(),
             transient_panes,
             extensions: SessionStatusExtensions { ai_pane_activity },
@@ -444,13 +457,14 @@ impl State {
         };
 
         let sidebar_is_closed = self.sidebar_is_closed(active_tab_position).unwrap_or(false);
+        let agent_is_closed = self.agent_is_closed(active_tab_position).unwrap_or(false);
         let pane_snapshots: Vec<HorizontalPaneSnapshot> = terminal_panes
             .iter()
             .map(|pane| HorizontalPaneSnapshot {
-                role: if pane.title.trim() == SIDEBAR_TITLE {
-                    HorizontalPaneRole::Sidebar
-                } else {
-                    HorizontalPaneRole::Other
+                role: match pane.title.trim() {
+                    SIDEBAR_TITLE => HorizontalPaneRole::Sidebar,
+                    AGENT_TITLE => HorizontalPaneRole::Agent,
+                    _ => HorizontalPaneRole::Other,
                 },
                 is_plugin: false,
                 exited: false,
@@ -462,7 +476,12 @@ impl State {
             })
             .collect();
 
-        match resolve_horizontal_focus(&pane_snapshots, direction, sidebar_is_closed) {
+        match resolve_horizontal_focus(
+            &pane_snapshots,
+            direction,
+            sidebar_is_closed,
+            agent_is_closed,
+        ) {
             HorizontalFocusPlan::FocusPane(index) => {
                 if let Some(target_pane) = terminal_panes.get(index) {
                     focus_pane_with_id(target_pane.pane_id, false, false);
@@ -503,6 +522,7 @@ impl State {
                 .map(|workspace| workspace.source.clone()),
             editor_pane_id: read_state.editor_pane_id,
             sidebar_pane_id: read_state.sidebar_pane_id,
+            agent_pane_id: read_state.agent_pane_id,
             sidebar_yazi_id: read_state
                 .sidebar_yazi
                 .as_ref()
@@ -512,6 +532,7 @@ impl State {
                 .as_ref()
                 .map(|state| state.cwd.clone()),
             sidebar_is_collapsed: read_state.sidebar_collapsed,
+            agent_is_collapsed: read_state.agent_collapsed,
         };
 
         match serde_json::to_string(&state) {

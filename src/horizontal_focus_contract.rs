@@ -7,6 +7,7 @@ pub enum HorizontalDirection {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HorizontalPaneRole {
     Sidebar,
+    Agent,
     Other,
 }
 
@@ -34,6 +35,7 @@ pub fn resolve_horizontal_focus(
     panes: &[HorizontalPaneSnapshot],
     direction: HorizontalDirection,
     sidebar_is_closed: bool,
+    agent_is_closed: bool,
 ) -> HorizontalFocusPlan {
     let Some((focused_index, focused_pane)) = panes
         .iter()
@@ -54,6 +56,7 @@ pub fn resolve_horizontal_focus(
         .filter(|(index, _pane)| *index != focused_index)
         .filter(|(_, pane)| !pane.is_plugin && !pane.exited)
         .filter(|(_, pane)| !(sidebar_is_closed && pane.role == HorizontalPaneRole::Sidebar))
+        .filter(|(_, pane)| !(agent_is_closed && pane.role == HorizontalPaneRole::Agent))
         .filter_map(|(index, pane)| {
             let candidate_left = pane.pane_x;
             let candidate_right = pane.pane_x + pane.pane_columns;
@@ -133,7 +136,7 @@ mod tests {
         ];
 
         assert_eq!(
-            resolve_horizontal_focus(&panes, HorizontalDirection::Left, true),
+            resolve_horizontal_focus(&panes, HorizontalDirection::Left, true, false),
             HorizontalFocusPlan::PreviousTab
         );
     }
@@ -165,8 +168,40 @@ mod tests {
         ];
 
         assert_eq!(
-            resolve_horizontal_focus(&panes, HorizontalDirection::Left, false),
+            resolve_horizontal_focus(&panes, HorizontalDirection::Left, false, false),
             HorizontalFocusPlan::FocusPane(0)
+        );
+    }
+
+    // Defends: a collapsed right-side agent pane is hidden from horizontal focus walking.
+    #[test]
+    fn closed_agent_is_skipped_when_walking_right() {
+        let panes = [
+            HorizontalPaneSnapshot {
+                role: HorizontalPaneRole::Other,
+                is_plugin: false,
+                exited: false,
+                is_focused: true,
+                pane_x: 0,
+                pane_y: 0,
+                pane_columns: 80,
+                pane_rows: 40,
+            },
+            HorizontalPaneSnapshot {
+                role: HorizontalPaneRole::Agent,
+                is_plugin: false,
+                exited: false,
+                is_focused: false,
+                pane_x: 80,
+                pane_y: 0,
+                pane_columns: 1,
+                pane_rows: 40,
+            },
+        ];
+
+        assert_eq!(
+            resolve_horizontal_focus(&panes, HorizontalDirection::Right, false, true),
+            HorizontalFocusPlan::NextTab
         );
     }
 
@@ -207,7 +242,7 @@ mod tests {
         ];
 
         assert_eq!(
-            resolve_horizontal_focus(&panes, HorizontalDirection::Left, true),
+            resolve_horizontal_focus(&panes, HorizontalDirection::Left, true, false),
             HorizontalFocusPlan::FocusPane(1)
         );
     }
@@ -239,7 +274,7 @@ mod tests {
         ];
 
         assert_eq!(
-            resolve_horizontal_focus(&panes, HorizontalDirection::Right, true),
+            resolve_horizontal_focus(&panes, HorizontalDirection::Right, true, false),
             HorizontalFocusPlan::NextTab
         );
     }

@@ -24,6 +24,9 @@ pub struct SessionManagedPanes {
     pub editor_pane_id: Option<String>,
     /// Owned live state: managed sidebar pane identity, when present.
     pub sidebar_pane_id: Option<String>,
+    /// Owned live state: managed agent pane identity, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_pane_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -32,6 +35,9 @@ pub struct SessionLayout {
     pub active_swap_layout_name: Option<String>,
     /// Derived state: sidebar visibility resolved from the active Yazelix layout family.
     pub sidebar_collapsed: Option<bool>,
+    /// Derived state: right agent sidebar visibility, when the managed agent exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_collapsed: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -146,9 +152,11 @@ pub struct ActiveTabReadState {
     pub bootstrap_workspace: Option<SessionWorkspace>,
     pub editor_pane_id: Option<String>,
     pub sidebar_pane_id: Option<String>,
+    pub agent_pane_id: Option<String>,
     pub focus_context: String,
     pub active_swap_layout_name: Option<String>,
     pub sidebar_collapsed: Option<bool>,
+    pub agent_collapsed: Option<bool>,
     pub sidebar_yazi: Option<SessionSidebarYazi>,
     pub transient_panes: SessionTransientPanes,
     pub extensions: SessionStatusExtensions,
@@ -183,11 +191,13 @@ pub fn build_active_tab_session_state_v1(
         managed_panes: SessionManagedPanes {
             editor_pane_id: read_state.editor_pane_id,
             sidebar_pane_id: read_state.sidebar_pane_id,
+            agent_pane_id: read_state.agent_pane_id,
         },
         focus_context: read_state.focus_context,
         layout: SessionLayout {
             active_swap_layout_name: read_state.active_swap_layout_name,
             sidebar_collapsed: read_state.sidebar_collapsed,
+            agent_collapsed: read_state.agent_collapsed,
         },
         sidebar_yazi: read_state.sidebar_yazi,
         transient_panes: read_state.transient_panes,
@@ -217,9 +227,11 @@ mod tests {
                 }),
                 editor_pane_id: Some("terminal:7".into()),
                 sidebar_pane_id: Some("terminal:8".into()),
+                agent_pane_id: None,
                 focus_context: "sidebar".into(),
                 active_swap_layout_name: Some("single_closed".into()),
                 sidebar_collapsed: Some(true),
+                agent_collapsed: None,
                 sidebar_yazi: Some(SessionSidebarYazi {
                     yazi_id: "sidebar-123".into(),
                     cwd: "/tmp/project".into(),
@@ -249,6 +261,7 @@ mod tests {
             SessionManagedPanes {
                 editor_pane_id: Some("terminal:7".into()),
                 sidebar_pane_id: Some("terminal:8".into()),
+                agent_pane_id: None,
             }
         );
         assert_eq!(snapshot.focus_context, "sidebar");
@@ -257,6 +270,7 @@ mod tests {
             SessionLayout {
                 active_swap_layout_name: Some("single_closed".into()),
                 sidebar_collapsed: Some(true),
+                agent_collapsed: None,
             }
         );
         assert_eq!(
@@ -288,9 +302,11 @@ mod tests {
                 }),
                 editor_pane_id: None,
                 sidebar_pane_id: Some("terminal:9".into()),
+                agent_pane_id: None,
                 focus_context: "other".into(),
                 active_swap_layout_name: None,
                 sidebar_collapsed: None,
+                agent_collapsed: None,
                 sidebar_yazi: None,
                 transient_panes: SessionTransientPanes::default(),
                 extensions: SessionStatusExtensions::default(),
@@ -350,9 +366,11 @@ mod tests {
                 bootstrap_workspace: None,
                 editor_pane_id: Some("terminal:1".into()),
                 sidebar_pane_id: Some("terminal:2".into()),
+                agent_pane_id: Some("terminal:3".into()),
                 focus_context: "editor".into(),
-                active_swap_layout_name: Some("single_open".into()),
+                active_swap_layout_name: Some("single_open_agent_closed".into()),
                 sidebar_collapsed: Some(false),
+                agent_collapsed: Some(true),
                 sidebar_yazi: None,
                 transient_panes: SessionTransientPanes {
                     popup: None,
@@ -388,12 +406,14 @@ mod tests {
                 },
                 "managed_panes": {
                     "editor_pane_id": "terminal:1",
-                    "sidebar_pane_id": "terminal:2"
+                    "sidebar_pane_id": "terminal:2",
+                    "agent_pane_id": "terminal:3"
                 },
                 "focus_context": "editor",
                 "layout": {
-                    "active_swap_layout_name": "single_open",
-                    "sidebar_collapsed": false
+                    "active_swap_layout_name": "single_open_agent_closed",
+                    "sidebar_collapsed": false,
+                    "agent_collapsed": true
                 },
                 "sidebar_yazi": null,
                 "transient_panes": {
