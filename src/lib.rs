@@ -1,4 +1,5 @@
 pub mod active_tab_session_state;
+pub mod agent_focus_contract;
 pub mod ai_pane_activity_contract;
 pub mod editor_open_contract;
 pub mod horizontal_focus_contract;

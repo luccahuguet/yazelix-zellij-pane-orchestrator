@@ -30,6 +30,7 @@ use zellij_tile::prelude::*;
 pub(crate) const RESULT_OK: &str = "ok";
 pub(crate) const RESULT_FOCUSED_EDITOR: &str = "focused_editor";
 pub(crate) const RESULT_FOCUSED_SIDEBAR: &str = "focused_sidebar";
+pub(crate) const RESULT_FOCUSED_AGENT: &str = "focused_agent";
 pub(crate) const RESULT_OPENED_SIDEBAR: &str = "opened_sidebar";
 pub(crate) const RESULT_MISSING: &str = "missing";
 pub(crate) const RESULT_NOT_READY: &str = "not_ready";
@@ -214,6 +215,10 @@ impl ZellijPlugin for State {
             }
             "toggle_editor_sidebar_focus" => {
                 self.toggle_editor_sidebar_focus(&pipe_message);
+                false
+            }
+            "toggle_editor_right_sidebar_focus" => {
+                self.toggle_editor_right_sidebar_focus(&pipe_message);
                 false
             }
             "move_focus_left_or_tab" => {
