@@ -22,6 +22,7 @@ use yazelix_zellij_pane_orchestrator::horizontal_focus_contract::HorizontalDirec
 use yazelix_zellij_pane_orchestrator::layout_state_contract::{
     LayoutFamilyDirection, LayoutVariant,
 };
+use yazelix_zellij_pane_orchestrator::right_sidebar_command_contract::RightSidebarCommandConfig;
 use yazelix_zellij_pane_orchestrator::screen_saver_contract::ScreenSaverConfig;
 use yazelix_zellij_pane_orchestrator::status_bar_cache_contract::StatusBarCacheRuntime;
 use yazelix_zellij_pane_orchestrator::timer_schedule_contract::next_timer_delay;
@@ -62,6 +63,7 @@ struct State {
     initial_workspace_state: Option<WorkspaceState>,
     runtime_dir: PathBuf,
     screen_saver_config: ScreenSaverConfig,
+    right_sidebar_command: Option<RightSidebarCommandConfig>,
     screen_saver_last_input: Option<Instant>,
     screen_saver_next_timeout: Option<Instant>,
     screen_saver_pane_id: Option<PaneId>,
@@ -102,6 +104,8 @@ impl ZellijPlugin for State {
             .filter(|path| !path.as_os_str().is_empty())
             .unwrap_or(plugin_ids.initial_cwd);
         self.screen_saver_config = ScreenSaverConfig::from_plugin_configuration(&configuration);
+        self.right_sidebar_command =
+            RightSidebarCommandConfig::from_plugin_configuration(&configuration);
         self.runtime_config_generation = configuration
             .get("runtime_config_generation")
             .map(|value| value.trim().to_string())

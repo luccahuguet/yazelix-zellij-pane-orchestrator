@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -142,7 +143,14 @@ impl State {
     }
 
     fn create_agent_sidebar(&self, active_tab_position: usize) -> Result<(), &'static str> {
-        let command_to_run = CommandToRun::new_with_args("yzx", vec!["agent"]);
+        let Some(right_sidebar_command) = self.right_sidebar_command.as_ref() else {
+            return Err(RESULT_MISSING);
+        };
+        let command_to_run = CommandToRun {
+            path: PathBuf::from(&right_sidebar_command.command),
+            args: right_sidebar_command.args.clone(),
+            cwd: None,
+        };
         let Some(agent_pane_id) = open_command_pane(command_to_run, BTreeMap::new()) else {
             return Err(RESULT_MISSING);
         };

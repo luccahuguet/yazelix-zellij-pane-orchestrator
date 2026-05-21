@@ -6,6 +6,7 @@ pub mod horizontal_focus_contract;
 pub mod layout_state_contract;
 pub mod orchestrator_heartbeat_contract;
 pub mod pane_contract;
+pub mod right_sidebar_command_contract;
 pub mod runtime_config_contract;
 pub mod screen_saver_contract;
 pub mod sidebar_contract;
