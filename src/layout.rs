@@ -297,9 +297,6 @@ impl State {
         let current_variant = self.layout_variant_for_tab(active_tab_position)?;
         let target_variant = current_variant.with_agent_state(agent_state);
         self.run_to_layout_variant_for_tab(active_tab_position, current_variant, target_variant);
-        if agent_state == AgentState::Open {
-            self.move_agent_right_after_layout_settle(active_tab_position);
-        }
         Some(())
     }
 

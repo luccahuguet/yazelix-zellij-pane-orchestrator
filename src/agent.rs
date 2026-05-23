@@ -170,6 +170,7 @@ impl State {
         {
             return Err(RESULT_UNKNOWN_LAYOUT);
         }
+        self.move_agent_pane_right_after_layout_settle(agent_pane_id);
         sleep(Duration::from_millis(COMMAND_STEP_DELAY_MS));
         focus_pane_with_id(agent_pane_id, false, false);
         Ok(())
@@ -196,13 +197,17 @@ impl State {
     }
 
     pub(crate) fn move_agent_right_after_layout_settle(&self, active_tab_position: usize) {
-        sleep(Duration::from_millis(COMMAND_STEP_DELAY_MS));
         if let Some(agent_pane) = self
             .managed_panes_by_tab
             .get(&active_tab_position)
             .and_then(|managed_tab_panes| managed_tab_panes.agent)
         {
-            move_pane_with_pane_id_in_direction(agent_pane.pane_id, Direction::Right);
+            self.move_agent_pane_right_after_layout_settle(agent_pane.pane_id);
         }
+    }
+
+    fn move_agent_pane_right_after_layout_settle(&self, agent_pane_id: PaneId) {
+        sleep(Duration::from_millis(COMMAND_STEP_DELAY_MS));
+        move_pane_with_pane_id_in_direction(agent_pane_id, Direction::Right);
     }
 }
