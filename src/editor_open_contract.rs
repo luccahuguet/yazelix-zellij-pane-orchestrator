@@ -45,13 +45,6 @@ pub fn build_editor_command_sequence(
     }
 
     match editor {
-        "helix" => Ok(EditorCommandSequence {
-            change_directory_command,
-            open_file_commands: file_paths
-                .iter()
-                .map(|file_path| format!(":open \"{}\"", escape_helix_path(file_path)))
-                .collect(),
-        }),
         "neovim" => Ok(EditorCommandSequence {
             change_directory_command,
             open_file_commands: file_paths
@@ -70,17 +63,12 @@ pub fn build_editor_command_sequence(
 
 pub fn build_editor_change_directory_command(editor: &str, working_dir: &str) -> Option<String> {
     match editor {
-        "helix" => Some(format!(":cd \"{}\"", escape_helix_path(working_dir))),
         "neovim" => Some(format!(
             ":execute 'cd ' . fnameescape('{}')",
             escape_vim_single_quoted_string(working_dir)
         )),
         _ => None,
     }
-}
-
-fn escape_helix_path(path: &str) -> String {
-    path.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn escape_vim_single_quoted_string(path: &str) -> String {
@@ -106,23 +94,25 @@ mod tests {
         );
     }
 
-    // Defends: managed Helix pane reuse opens every selected Yazi file through explicit editor commands.
+    // Defends: Helix file opens are editor-bridge owned and must not fall back to command-mode text injection.
     #[test]
-    fn helix_sequence_builds_one_open_command_per_selected_file() {
-        let sequence = build_editor_command_sequence(
-            "helix",
-            "/tmp/project",
-            &["/tmp/project/one.txt", "/tmp/project/two words.txt"],
-        )
-        .unwrap();
-
-        assert_eq!(sequence.change_directory_command, ":cd \"/tmp/project\"");
+    fn helix_open_file_command_sequence_is_rejected() {
         assert_eq!(
-            sequence.open_file_commands,
-            vec![
-                ":open \"/tmp/project/one.txt\"",
-                ":open \"/tmp/project/two words.txt\""
-            ]
+            build_editor_command_sequence(
+                "helix",
+                "/tmp/project",
+                &["/tmp/project/one.txt", "/tmp/project/two words.txt"],
+            ),
+            Err(EditorCommandSequenceError::UnsupportedEditor)
+        );
+    }
+
+    // Defends: Helix cwd sync is editor-bridge owned and must not fall back to command-mode text injection.
+    #[test]
+    fn helix_change_directory_command_is_rejected() {
+        assert_eq!(
+            build_editor_change_directory_command("helix", "/tmp/project"),
+            None
         );
     }
 
@@ -153,7 +143,7 @@ mod tests {
     #[test]
     fn command_sequence_rejects_empty_target_payload() {
         assert_eq!(
-            build_editor_command_sequence("helix", "/tmp/project", &[]),
+            build_editor_command_sequence("neovim", "/tmp/project", &[]),
             Err(EditorCommandSequenceError::EmptyTargets)
         );
     }

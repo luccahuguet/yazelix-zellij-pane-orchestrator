@@ -69,6 +69,8 @@ Yazelix integration commands depend on Yazelix-managed editor/sidebar/workspace 
 - `retarget_workspace`
 - `reload_runtime_config`
 
+Editor command-mode integration is Neovim-only. Helix buffer opens and cwd sync are owned by the Yazelix Helix action bridge; direct Helix `open_file`, `set_managed_editor_cwd`, or `retarget_workspace` editor requests are rejected instead of sending `:open` or `:cd` text into the terminal.
+
 Debug commands are maintainer-only and not part of the ordinary standalone API:
 
 - `maintainer_debug_editor_state`
