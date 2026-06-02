@@ -42,7 +42,17 @@
           buildPhase = ''
             runHook preBuild
 
-            cargo build \
+            export CARGO="${rustToolchain}/bin/cargo"
+            export RUSTC="${rustToolchain}/bin/rustc"
+            export PATH="${rustToolchain}/bin:$PATH"
+
+            wasm_target_libdir="$("$RUSTC" --print target-libdir --target wasm32-wasip1)"
+            if [ ! -d "$wasm_target_libdir" ]; then
+              echo "Rust toolchain is missing wasm32-wasip1 std at $wasm_target_libdir" >&2
+              exit 1
+            fi
+
+            "$CARGO" build \
               --target-dir target \
               --offline \
               --profile release \
