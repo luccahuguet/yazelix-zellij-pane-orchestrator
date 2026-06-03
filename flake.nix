@@ -37,11 +37,10 @@
           version = "0.1.0";
           src = pkgs.lib.cleanSource ./.;
           cargoLock.lockFile = ./Cargo.lock;
+          dontCargoBuild = true;
           doCheck = false;
 
           buildPhase = ''
-            runHook preBuild
-
             export CARGO="${rustToolchain}/bin/cargo"
             export RUSTC="${rustToolchain}/bin/rustc"
             export PATH="${rustToolchain}/bin:$PATH"
@@ -51,6 +50,8 @@
               echo "Rust toolchain is missing wasm32-wasip1 std at $wasm_target_libdir" >&2
               exit 1
             fi
+
+            runHook preBuild
 
             "$CARGO" build \
               --target-dir target \
