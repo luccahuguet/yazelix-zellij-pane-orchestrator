@@ -32,12 +32,26 @@
           cargo = rustToolchain;
           rustc = rustToolchain;
         };
+        zellijPluginWasmPackageContract = {
+          schemaVersion = 1;
+          pluginName = "yazelix-zellij-pane-orchestrator";
+          packageAttr = "yazelix_zellij_pane_orchestrator";
+          wasmPath = "share/yazelix_zellij_pane_orchestrator/yazelix_pane_orchestrator.wasm";
+          wasmTarget = "wasm32-wasip1";
+          cargoBuildHookDisabled = true;
+          explicitCargoFromWasmToolchain = true;
+          explicitRustcFromWasmToolchain = true;
+          toolchainPrependedToPath = true;
+          wasmTargetLibdirCheckedBeforePreBuild = true;
+          cargoBuildRunsAfterPreBuild = true;
+          installCheckVerifiesWasm = true;
+        };
         yazelixZellijPaneOrchestrator = rustPlatform.buildRustPackage {
           pname = "yazelix-zellij-pane-orchestrator";
           version = "0.1.0";
           src = pkgs.lib.cleanSource ./.;
           cargoLock.lockFile = ./Cargo.lock;
-          dontCargoBuild = true;
+          dontCargoBuild = zellijPluginWasmPackageContract.cargoBuildHookDisabled;
           doCheck = false;
 
           buildPhase = ''
@@ -45,7 +59,7 @@
             export RUSTC="${rustToolchain}/bin/rustc"
             export PATH="${rustToolchain}/bin:$PATH"
 
-            wasm_target_libdir="$("$RUSTC" --print target-libdir --target wasm32-wasip1)"
+            wasm_target_libdir="$("$RUSTC" --print target-libdir --target ${zellijPluginWasmPackageContract.wasmTarget})"
             if [ ! -d "$wasm_target_libdir" ]; then
               echo "Rust toolchain is missing wasm32-wasip1 std at $wasm_target_libdir" >&2
               exit 1
@@ -57,7 +71,7 @@
               --target-dir target \
               --offline \
               --profile release \
-              --target wasm32-wasip1
+              --target ${zellijPluginWasmPackageContract.wasmTarget}
 
             runHook postBuild
           '';
@@ -67,7 +81,7 @@
 
             install -Dm644 \
               target/wasm32-wasip1/release/yazelix_zellij_pane_orchestrator.wasm \
-              "$out/share/yazelix_zellij_pane_orchestrator/yazelix_pane_orchestrator.wasm"
+              "$out/${zellijPluginWasmPackageContract.wasmPath}"
             install -Dm644 README.md "$out/share/doc/yazelix_zellij_pane_orchestrator/README.md"
 
             runHook postInstall
@@ -80,13 +94,14 @@
           installCheckPhase = ''
             runHook preInstallCheck
 
-            test -s "$out/share/yazelix_zellij_pane_orchestrator/yazelix_pane_orchestrator.wasm"
+            test -s "$out/${zellijPluginWasmPackageContract.wasmPath}"
 
             runHook postInstallCheck
           '';
 
           passthru = {
-            wasmPath = "share/yazelix_zellij_pane_orchestrator/yazelix_pane_orchestrator.wasm";
+            inherit zellijPluginWasmPackageContract;
+            wasmPath = zellijPluginWasmPackageContract.wasmPath;
           };
 
           meta = {
