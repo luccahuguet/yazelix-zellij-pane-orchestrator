@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 use yazelix_zellij_pane_orchestrator::active_tab_session_state::{
@@ -16,6 +16,7 @@ use yazelix_zellij_pane_orchestrator::pane_contract::{
 use yazelix_zellij_pane_orchestrator::sidebar_contract::{
     resolve_sidebar_focus_toggle, SidebarFocusTogglePlan,
 };
+use yazelix_zellij_pane_orchestrator::tab_identity_contract::retain_current_tab_state;
 use yazelix_zellij_pane_orchestrator::transient_pane_contract::{
     select_transient_pane, transient_pane_identity, TransientPaneKind, TransientPaneSnapshot,
 };
@@ -65,6 +66,64 @@ pub(crate) enum ManagedPaneKind {
 
 pub(crate) type FocusContext = FocusContextPolicy;
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TabPaneCaches {
+    pub(crate) focus_context_by_tab: HashMap<usize, FocusContext>,
+    pub(crate) focused_terminal_pane_by_tab: HashMap<usize, PaneId>,
+    pub(crate) fallback_terminal_pane_by_tab: HashMap<usize, PaneId>,
+    pub(crate) managed_panes_by_tab: HashMap<usize, ManagedTabPanes>,
+    pub(crate) terminal_panes_by_tab: HashMap<usize, Vec<TerminalPaneLayout>>,
+    pub(crate) zjstatus_plugin_id_by_tab: HashMap<usize, u32>,
+    pub(crate) user_pane_count_by_tab: HashMap<usize, usize>,
+}
+
+impl TabPaneCaches {
+    pub(crate) fn rebuild(
+        pane_manifest: &PaneManifest,
+        tab_id_by_position: &HashMap<usize, usize>,
+        previous_focus_context_by_tab: &HashMap<usize, FocusContext>,
+    ) -> Self {
+        Self {
+            focus_context_by_tab: build_focus_context_by_tab(
+                pane_manifest,
+                tab_id_by_position,
+                previous_focus_context_by_tab,
+            ),
+            focused_terminal_pane_by_tab: build_focused_terminal_pane_by_tab(
+                pane_manifest,
+                tab_id_by_position,
+            ),
+            fallback_terminal_pane_by_tab: build_fallback_terminal_pane_by_tab(
+                pane_manifest,
+                tab_id_by_position,
+            ),
+            managed_panes_by_tab: build_managed_panes_by_tab(pane_manifest, tab_id_by_position),
+            terminal_panes_by_tab: build_terminal_panes_by_tab(pane_manifest, tab_id_by_position),
+            zjstatus_plugin_id_by_tab: build_zjstatus_plugin_id_by_tab(
+                pane_manifest,
+                tab_id_by_position,
+            ),
+            user_pane_count_by_tab: build_user_pane_count_by_tab(pane_manifest, tab_id_by_position),
+        }
+    }
+
+    pub(crate) fn retain_current_tabs(&mut self, current_tab_ids: &HashSet<usize>) {
+        retain_current_tab_state(&mut self.focus_context_by_tab, current_tab_ids);
+        retain_current_tab_state(&mut self.focused_terminal_pane_by_tab, current_tab_ids);
+        retain_current_tab_state(&mut self.fallback_terminal_pane_by_tab, current_tab_ids);
+        retain_current_tab_state(&mut self.managed_panes_by_tab, current_tab_ids);
+        retain_current_tab_state(&mut self.terminal_panes_by_tab, current_tab_ids);
+        retain_current_tab_state(&mut self.zjstatus_plugin_id_by_tab, current_tab_ids);
+        retain_current_tab_state(&mut self.user_pane_count_by_tab, current_tab_ids);
+    }
+
+    pub(crate) fn has_zjstatus_plugin_id(&self, plugin_id: u32) -> bool {
+        self.zjstatus_plugin_id_by_tab
+            .values()
+            .any(|id| *id == plugin_id)
+    }
+}
+
 #[derive(Serialize)]
 struct MaintainerDebugEditorState {
     permissions_granted: bool,
@@ -81,7 +140,7 @@ struct MaintainerDebugEditorState {
     agent_is_collapsed: Option<bool>,
 }
 
-pub(crate) fn build_managed_panes_by_tab(
+fn build_managed_panes_by_tab(
     pane_manifest: &PaneManifest,
     tab_id_by_position: &HashMap<usize, usize>,
 ) -> HashMap<usize, ManagedTabPanes> {
@@ -104,7 +163,7 @@ pub(crate) fn build_managed_panes_by_tab(
     managed_panes_by_tab
 }
 
-pub(crate) fn build_user_pane_count_by_tab(
+fn build_user_pane_count_by_tab(
     pane_manifest: &PaneManifest,
     tab_id_by_position: &HashMap<usize, usize>,
 ) -> HashMap<usize, usize> {
@@ -123,7 +182,7 @@ pub(crate) fn build_user_pane_count_by_tab(
         .collect()
 }
 
-pub(crate) fn build_focus_context_by_tab(
+fn build_focus_context_by_tab(
     pane_manifest: &PaneManifest,
     tab_id_by_position: &HashMap<usize, usize>,
     previous_focus_context_by_tab: &HashMap<usize, FocusContext>,
@@ -149,7 +208,7 @@ pub(crate) fn build_focus_context_by_tab(
     focus_context_by_tab
 }
 
-pub(crate) fn build_focused_terminal_pane_by_tab(
+fn build_focused_terminal_pane_by_tab(
     pane_manifest: &PaneManifest,
     tab_id_by_position: &HashMap<usize, usize>,
 ) -> HashMap<usize, PaneId> {
@@ -166,7 +225,7 @@ pub(crate) fn build_focused_terminal_pane_by_tab(
         .collect()
 }
 
-pub(crate) fn build_fallback_terminal_pane_by_tab(
+fn build_fallback_terminal_pane_by_tab(
     pane_manifest: &PaneManifest,
     tab_id_by_position: &HashMap<usize, usize>,
 ) -> HashMap<usize, PaneId> {
@@ -190,7 +249,7 @@ pub(crate) fn build_fallback_terminal_pane_by_tab(
         .collect()
 }
 
-pub(crate) fn build_terminal_panes_by_tab(
+fn build_terminal_panes_by_tab(
     pane_manifest: &PaneManifest,
     tab_id_by_position: &HashMap<usize, usize>,
 ) -> HashMap<usize, Vec<TerminalPaneLayout>> {
@@ -219,7 +278,7 @@ pub(crate) fn build_terminal_panes_by_tab(
         .collect()
 }
 
-pub(crate) fn build_zjstatus_plugin_id_by_tab(
+fn build_zjstatus_plugin_id_by_tab(
     pane_manifest: &PaneManifest,
     tab_id_by_position: &HashMap<usize, usize>,
 ) -> HashMap<usize, u32> {
@@ -297,26 +356,31 @@ impl State {
             _ => None,
         };
         let editor_pane = active_tab_id
-            .and_then(|tab_id| self.managed_panes_by_tab.get(&tab_id))
+            .and_then(|tab_id| self.tab_pane_caches.managed_panes_by_tab.get(&tab_id))
             .and_then(|managed_tab_panes| managed_tab_panes.editor);
         let sidebar_pane = active_tab_id
-            .and_then(|tab_id| self.managed_panes_by_tab.get(&tab_id))
+            .and_then(|tab_id| self.tab_pane_caches.managed_panes_by_tab.get(&tab_id))
             .and_then(|managed_tab_panes| managed_tab_panes.sidebar);
         let agent_pane = active_tab_id
-            .and_then(|tab_id| self.managed_panes_by_tab.get(&tab_id))
+            .and_then(|tab_id| self.tab_pane_caches.managed_panes_by_tab.get(&tab_id))
             .and_then(|managed_tab_panes| managed_tab_panes.agent);
         let sidebar_yazi_state =
             active_tab_id.and_then(|tab_id| self.get_active_sidebar_yazi_state_snapshot(tab_id));
         let transient_panes = build_session_transient_panes(
             active_tab_id
-                .and_then(|tab_id| self.terminal_panes_by_tab.get(&tab_id))
+                .and_then(|tab_id| self.tab_pane_caches.terminal_panes_by_tab.get(&tab_id))
                 .map(Vec::as_slice),
         );
         let ai_pane_activity = active_tab_id
             .map(|tab_id| self.get_active_ai_pane_activity_snapshot(tab_id))
             .unwrap_or_default();
         let focus_context = match active_tab_id
-            .and_then(|tab_id| self.focus_context_by_tab.get(&tab_id).copied())
+            .and_then(|tab_id| {
+                self.tab_pane_caches
+                    .focus_context_by_tab
+                    .get(&tab_id)
+                    .copied()
+            })
             .unwrap_or(FocusContext::Other)
         {
             FocusContext::Editor => "editor",
@@ -348,10 +412,9 @@ impl State {
         active_tab_id: usize,
     ) -> ActiveTabSessionStateV1 {
         let active_tab_position = self
-            .tab_position_by_id
-            .get(&active_tab_id)
-            .copied()
-            .or(self.active_tab_position)
+            .tab_identity
+            .position_for_tab_id(active_tab_id)
+            .or(self.tab_identity.active_tab_position())
             .unwrap_or(active_tab_id);
         let read_state = self.collect_active_tab_read_state(Some(active_tab_id));
         build_active_tab_session_state_v1(active_tab_position, read_state)
@@ -363,6 +426,7 @@ impl State {
         };
 
         let focus_context = self
+            .tab_pane_caches
             .focus_context_by_tab
             .get(&active_tab_id)
             .copied()
@@ -392,7 +456,8 @@ impl State {
         };
 
         let sidebar_is_closed = if matches!(pane_kind, ManagedPaneKind::Sidebar) {
-            self.active_tab_id
+            self.tab_identity
+                .active_tab_id()
                 .and_then(|tab_id| self.sidebar_is_closed(tab_id))
                 .unwrap_or(false)
         } else {
@@ -400,7 +465,7 @@ impl State {
         };
 
         if sidebar_is_closed {
-            if let Some(active_tab_id) = self.active_tab_id {
+            if let Some(active_tab_id) = self.tab_identity.active_tab_id() {
                 self.open_sidebar_and_focus_after_layout_settle_for_tab(active_tab_id);
             } else {
                 self.open_sidebar_and_focus_after_layout_settle();
@@ -416,12 +481,17 @@ impl State {
             return;
         };
 
-        let Some(managed_tab_panes) = self.managed_panes_by_tab.get(&active_tab_id) else {
+        let Some(managed_tab_panes) = self
+            .tab_pane_caches
+            .managed_panes_by_tab
+            .get(&active_tab_id)
+        else {
             self.respond(pipe_message, RESULT_MISSING);
             return;
         };
 
         let focus_context = self
+            .tab_pane_caches
             .focus_context_by_tab
             .get(&active_tab_id)
             .copied()
@@ -472,7 +542,11 @@ impl State {
             return;
         };
 
-        let Some(terminal_panes) = self.terminal_panes_by_tab.get(&active_tab_id) else {
+        let Some(terminal_panes) = self
+            .tab_pane_caches
+            .terminal_panes_by_tab
+            .get(&active_tab_id)
+        else {
             self.respond(pipe_message, RESULT_MISSING);
             return;
         };
@@ -524,8 +598,8 @@ impl State {
     }
 
     pub(crate) fn maintainer_debug_editor_state(&self, pipe_message: &PipeMessage) {
-        let active_tab_position = self.active_tab_position;
-        let read_state = self.collect_active_tab_read_state(self.active_tab_id);
+        let active_tab_position = self.tab_identity.active_tab_position();
+        let read_state = self.collect_active_tab_read_state(self.tab_identity.active_tab_id());
 
         let state = MaintainerDebugEditorState {
             permissions_granted: self.permissions_granted,
@@ -583,13 +657,14 @@ impl State {
             return None;
         };
 
-        let managed_pane =
-            self.managed_panes_by_tab
-                .get(&active_tab_id)
-                .and_then(|managed_tab_panes| match pane_kind {
-                    ManagedPaneKind::Editor => managed_tab_panes.editor,
-                    ManagedPaneKind::Sidebar => managed_tab_panes.sidebar,
-                });
+        let managed_pane = self
+            .tab_pane_caches
+            .managed_panes_by_tab
+            .get(&active_tab_id)
+            .and_then(|managed_tab_panes| match pane_kind {
+                ManagedPaneKind::Editor => managed_tab_panes.editor,
+                ManagedPaneKind::Sidebar => managed_tab_panes.sidebar,
+            });
 
         match managed_pane {
             Some(managed_pane) => Some(managed_pane),
@@ -606,6 +681,7 @@ impl State {
         };
 
         match self
+            .tab_pane_caches
             .focused_terminal_pane_by_tab
             .get(&active_tab_id)
             .copied()

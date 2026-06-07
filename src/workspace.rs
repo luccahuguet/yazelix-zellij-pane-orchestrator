@@ -92,7 +92,7 @@ impl State {
         let Some(active_tab_id) = self.ensure_action_ready(pipe_message) else {
             return;
         };
-        let Some(active_tab_position) = self.active_tab_position else {
+        let Some(active_tab_position) = self.tab_identity.active_tab_position() else {
             self.respond(pipe_message, RESULT_MISSING);
             return;
         };
@@ -155,6 +155,7 @@ impl State {
                 };
 
                 let Some(editor_pane) = self
+                    .tab_pane_caches
                     .managed_panes_by_tab
                     .get(&active_tab_id)
                     .and_then(|managed_tab_panes| managed_tab_panes.editor)
@@ -198,6 +199,7 @@ impl State {
         }
 
         let expected_sidebar_pane_id = self
+            .tab_pane_caches
             .managed_panes_by_tab
             .get(&active_tab_id)
             .and_then(|managed_tab_panes| managed_tab_panes.sidebar)

@@ -19,6 +19,7 @@ impl State {
 
     pub(crate) fn reconcile_ai_pane_activity_panes(&mut self) {
         let pane_ids_by_tab = self
+            .tab_pane_caches
             .terminal_panes_by_tab
             .iter()
             .map(|(tab_id, panes)| {
@@ -96,9 +97,8 @@ impl State {
         };
 
         let tab_position = self
-            .tab_position_by_id
-            .get(&tab_id)
-            .copied()
+            .tab_identity
+            .position_for_tab_id(tab_id)
             .unwrap_or(tab_id);
         let fact = SessionAiPaneActivity::tab_local(tab_position, provider, pane_id, state);
         upsert_ai_pane_activity_fact(
@@ -113,9 +113,8 @@ impl State {
         active_tab_id: usize,
     ) -> Vec<SessionAiPaneActivity> {
         let active_tab_position = self
-            .tab_position_by_id
-            .get(&active_tab_id)
-            .copied()
+            .tab_identity
+            .position_for_tab_id(active_tab_id)
             .unwrap_or(active_tab_id);
         self.ai_pane_activity_by_tab
             .get(&active_tab_id)
@@ -133,7 +132,8 @@ impl State {
     }
 
     fn find_tab_id_for_terminal_pane_id(&self, pane_id: &str) -> Option<usize> {
-        self.terminal_panes_by_tab
+        self.tab_pane_caches
+            .terminal_panes_by_tab
             .iter()
             .find(|(_, panes)| {
                 panes

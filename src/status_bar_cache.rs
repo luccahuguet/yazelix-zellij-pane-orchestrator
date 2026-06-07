@@ -32,7 +32,7 @@ impl State {
         if !self.permissions_granted {
             return;
         }
-        let Some(active_tab_id) = self.active_tab_id else {
+        let Some(active_tab_id) = self.tab_identity.active_tab_id() else {
             return;
         };
         self.publish_workspace_status_pipe(active_tab_id);
@@ -65,7 +65,11 @@ impl State {
     }
 
     fn publish_workspace_status_pipe(&mut self, active_tab_id: usize) {
-        let Some(zjstatus_plugin_id) = self.zjstatus_plugin_id_by_tab.get(&active_tab_id).copied()
+        let Some(zjstatus_plugin_id) = self
+            .tab_pane_caches
+            .zjstatus_plugin_id_by_tab
+            .get(&active_tab_id)
+            .copied()
         else {
             return;
         };

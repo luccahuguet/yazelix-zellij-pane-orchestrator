@@ -80,12 +80,13 @@ impl State {
         &self,
         active_tab_id: usize,
     ) -> Option<&SidebarYaziState> {
-        let expected_pane_id =
-            self.managed_panes_by_tab
-                .get(&active_tab_id)
-                .and_then(|managed_tab_panes| {
-                    pane_id_to_string(managed_tab_panes.sidebar.map(|pane| pane.pane_id))
-                })?;
+        let expected_pane_id = self
+            .tab_pane_caches
+            .managed_panes_by_tab
+            .get(&active_tab_id)
+            .and_then(|managed_tab_panes| {
+                pane_id_to_string(managed_tab_panes.sidebar.map(|pane| pane.pane_id))
+            })?;
 
         let sidebar_state = self.sidebar_yazi_state_by_tab.get(&active_tab_id)?;
         if sidebar_state.pane_id == expected_pane_id {
@@ -100,7 +101,8 @@ impl State {
     }
 
     fn sidebar_pane_id_by_tab(&self) -> HashMap<usize, String> {
-        self.managed_panes_by_tab
+        self.tab_pane_caches
+            .managed_panes_by_tab
             .iter()
             .filter_map(|(tab_id, managed_tab_panes)| {
                 pane_id_to_string(managed_tab_panes.sidebar.map(|pane| pane.pane_id))

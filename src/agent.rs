@@ -22,11 +22,13 @@ impl State {
         };
 
         if let Some(agent_pane) = self
+            .tab_pane_caches
             .managed_panes_by_tab
             .get(&active_tab_id)
             .and_then(|managed_tab_panes| managed_tab_panes.agent)
         {
             let agent_is_focused = self
+                .tab_pane_caches
                 .focused_terminal_pane_by_tab
                 .get(&active_tab_id)
                 .copied()
@@ -66,7 +68,11 @@ impl State {
             return;
         };
 
-        let Some(managed_tab_panes) = self.managed_panes_by_tab.get(&active_tab_id) else {
+        let Some(managed_tab_panes) = self
+            .tab_pane_caches
+            .managed_panes_by_tab
+            .get(&active_tab_id)
+        else {
             self.respond(pipe_message, RESULT_MISSING);
             return;
         };
@@ -74,7 +80,8 @@ impl State {
         let agent_is_focused = managed_tab_panes
             .agent
             .map(|agent_pane| {
-                self.focused_terminal_pane_by_tab
+                self.tab_pane_caches
+                    .focused_terminal_pane_by_tab
                     .get(&active_tab_id)
                     .copied()
                     == Some(agent_pane.pane_id)
@@ -82,6 +89,7 @@ impl State {
             .unwrap_or(false);
         let agent_is_closed = self.agent_is_closed(active_tab_id).unwrap_or(false);
         let has_focus_fallback = self
+            .tab_pane_caches
             .fallback_terminal_pane_by_tab
             .get(&active_tab_id)
             .is_some();
@@ -103,6 +111,7 @@ impl State {
             }
             AgentFocusTogglePlan::FocusFallback => {
                 if let Some(fallback_pane) = self
+                    .tab_pane_caches
                     .fallback_terminal_pane_by_tab
                     .get(&active_tab_id)
                     .copied()
@@ -178,6 +187,7 @@ impl State {
     fn focus_non_agent_after_hide(&self, active_tab_id: usize) {
         sleep(Duration::from_millis(COMMAND_STEP_DELAY_MS));
         if let Some(editor_pane) = self
+            .tab_pane_caches
             .managed_panes_by_tab
             .get(&active_tab_id)
             .and_then(|managed_tab_panes| managed_tab_panes.editor)
@@ -187,6 +197,7 @@ impl State {
         }
 
         if let Some(fallback_pane) = self
+            .tab_pane_caches
             .fallback_terminal_pane_by_tab
             .get(&active_tab_id)
             .copied()
@@ -197,6 +208,7 @@ impl State {
 
     pub(crate) fn move_agent_right_after_layout_settle(&self, active_tab_id: usize) {
         if let Some(agent_pane) = self
+            .tab_pane_caches
             .managed_panes_by_tab
             .get(&active_tab_id)
             .and_then(|managed_tab_panes| managed_tab_panes.agent)

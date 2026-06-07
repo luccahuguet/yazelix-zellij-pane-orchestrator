@@ -58,7 +58,11 @@ impl State {
             return;
         };
 
-        if is_no_sidebar_mode(self.managed_panes_by_tab.get(&active_tab_id)) {
+        if is_no_sidebar_mode(
+            self.tab_pane_caches
+                .managed_panes_by_tab
+                .get(&active_tab_id),
+        ) {
             self.respond(pipe_message, RESULT_MISSING);
             return;
         }
@@ -69,13 +73,18 @@ impl State {
         };
 
         let focus_context = self
+            .tab_pane_caches
             .focus_context_by_tab
             .get(&active_tab_id)
             .copied()
             .unwrap_or(crate::panes::FocusContext::Other);
-        let managed_tab_panes = self.managed_panes_by_tab.get(&active_tab_id);
+        let managed_tab_panes = self
+            .tab_pane_caches
+            .managed_panes_by_tab
+            .get(&active_tab_id);
         let has_editor = managed_tab_panes.and_then(|tab| tab.editor).is_some();
         let has_focus_fallback = self
+            .tab_pane_caches
             .fallback_terminal_pane_by_tab
             .get(&active_tab_id)
             .is_some();
@@ -114,7 +123,11 @@ impl State {
             return;
         };
 
-        if is_no_sidebar_mode(self.managed_panes_by_tab.get(&active_tab_id)) {
+        if is_no_sidebar_mode(
+            self.tab_pane_caches
+                .managed_panes_by_tab
+                .get(&active_tab_id),
+        ) {
             self.respond(pipe_message, RESULT_MISSING);
             return;
         }
@@ -125,13 +138,18 @@ impl State {
         };
 
         let focus_context = self
+            .tab_pane_caches
             .focus_context_by_tab
             .get(&active_tab_id)
             .copied()
             .unwrap_or(crate::panes::FocusContext::Other);
-        let managed_tab_panes = self.managed_panes_by_tab.get(&active_tab_id);
+        let managed_tab_panes = self
+            .tab_pane_caches
+            .managed_panes_by_tab
+            .get(&active_tab_id);
         let has_editor = managed_tab_panes.and_then(|tab| tab.editor).is_some();
         let has_focus_fallback = self
+            .tab_pane_caches
             .fallback_terminal_pane_by_tab
             .get(&active_tab_id)
             .is_some();
@@ -184,7 +202,8 @@ impl State {
         if !self.active_layout_is_base(active_tab_id) {
             return None;
         }
-        self.managed_panes_by_tab
+        self.tab_pane_caches
+            .managed_panes_by_tab
             .get(&active_tab_id)
             .and_then(|tab| tab.sidebar)
             .map(|sidebar| sidebar.pane_columns <= CLOSED_BASE_SIDEBAR_COLUMNS)
@@ -201,6 +220,7 @@ impl State {
             SidebarState::Open
         };
         let agent_state = self
+            .tab_pane_caches
             .managed_panes_by_tab
             .get(&active_tab_id)
             .and_then(|tab| tab.agent)
@@ -228,12 +248,16 @@ impl State {
 
     fn can_switch_layout_family(&self, active_tab_id: usize) -> bool {
         let user_pane_count = self
+            .tab_pane_caches
             .user_pane_count_by_tab
             .get(&active_tab_id)
             .copied()
             .unwrap_or(0);
 
-        let managed_tab_panes = self.managed_panes_by_tab.get(&active_tab_id);
+        let managed_tab_panes = self
+            .tab_pane_caches
+            .managed_panes_by_tab
+            .get(&active_tab_id);
         if is_no_sidebar_mode(managed_tab_panes) {
             user_pane_count >= 2
         } else if managed_tab_panes.and_then(|tab| tab.agent).is_some() {
@@ -314,7 +338,7 @@ impl State {
     }
 
     pub(crate) fn open_sidebar_and_focus_after_layout_settle(&self) {
-        if let Some(active_tab_id) = self.active_tab_id {
+        if let Some(active_tab_id) = self.tab_identity.active_tab_id() {
             self.open_sidebar_and_focus_after_layout_settle_for_tab(active_tab_id);
             return;
         }

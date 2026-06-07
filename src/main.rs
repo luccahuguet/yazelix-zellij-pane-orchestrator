@@ -14,7 +14,6 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
-use panes::{FocusContext, ManagedTabPanes};
 use std::time::Instant;
 use workspace::{bootstrap_workspace_root, WorkspaceState};
 use yazelix_zellij_pane_orchestrator::active_tab_session_state::SessionAiPaneActivity;
@@ -26,8 +25,7 @@ use yazelix_zellij_pane_orchestrator::right_sidebar_command_contract::RightSideb
 use yazelix_zellij_pane_orchestrator::screen_saver_contract::ScreenSaverConfig;
 use yazelix_zellij_pane_orchestrator::status_bar_cache_contract::StatusBarCacheRuntime;
 use yazelix_zellij_pane_orchestrator::tab_identity_contract::{
-    active_tab_id, active_tab_position, retain_current_tab_state, tab_id_by_position,
-    tab_position_by_id,
+    retain_current_tab_state, TabIdentityState,
 };
 use yazelix_zellij_pane_orchestrator::timer_schedule_contract::next_timer_delay;
 use zellij_tile::prelude::*;
@@ -50,19 +48,10 @@ pub(crate) const SWAP_LAYOUT_STEP_DELAY_MS: u64 = 1;
 
 #[derive(Default)]
 struct State {
-    active_tab_position: Option<usize>,
-    active_tab_id: Option<usize>,
-    tab_id_by_position: HashMap<usize, usize>,
-    tab_position_by_id: HashMap<usize, usize>,
+    tab_identity: TabIdentityState,
     active_swap_layout_name_by_tab: HashMap<usize, Option<String>>,
     last_known_layout_variant_by_tab: RefCell<HashMap<usize, LayoutVariant>>,
-    focus_context_by_tab: HashMap<usize, FocusContext>,
-    focused_terminal_pane_by_tab: HashMap<usize, PaneId>,
-    fallback_terminal_pane_by_tab: HashMap<usize, PaneId>,
-    managed_panes_by_tab: HashMap<usize, ManagedTabPanes>,
-    terminal_panes_by_tab: HashMap<usize, Vec<panes::TerminalPaneLayout>>,
-    zjstatus_plugin_id_by_tab: HashMap<usize, u32>,
-    user_pane_count_by_tab: HashMap<usize, usize>,
+    tab_pane_caches: panes::TabPaneCaches,
     last_pane_manifest: Option<PaneManifest>,
     workspace_state_by_tab: HashMap<usize, WorkspaceState>,
     sidebar_yazi_state_by_tab: HashMap<usize, sidebar_yazi::SidebarYaziState>,
@@ -147,10 +136,7 @@ impl ZellijPlugin for State {
         self.record_orchestrator_event(heartbeat::event_kind(&event));
         match event {
             Event::TabUpdate(tabs) => {
-                self.active_tab_position = active_tab_position(&tabs);
-                self.active_tab_id = active_tab_id(&tabs);
-                self.tab_id_by_position = tab_id_by_position(&tabs);
-                self.tab_position_by_id = tab_position_by_id(&tabs);
+                self.tab_identity = TabIdentityState::from_tabs(&tabs);
                 self.reconcile_workspace_state(&tabs);
                 self.reconcile_ai_pane_activity_tabs(&tabs);
                 {
@@ -311,62 +297,33 @@ impl ZellijPlugin for State {
 
 impl State {
     fn rebuild_tab_local_pane_state(&mut self, pane_manifest: &PaneManifest) {
-        if self.tab_id_by_position.is_empty()
-            || pane_manifest.panes.len() != self.tab_id_by_position.len()
-            || pane_manifest
-                .panes
-                .keys()
-                .any(|tab_position| !self.tab_id_by_position.contains_key(tab_position))
-        {
+        if !self.tab_identity.has_complete_position_map(
+            pane_manifest.panes.keys().copied(),
+            pane_manifest.panes.len(),
+        ) {
             return;
         }
 
-        self.managed_panes_by_tab =
-            panes::build_managed_panes_by_tab(pane_manifest, &self.tab_id_by_position);
-        self.focus_context_by_tab = panes::build_focus_context_by_tab(
+        self.tab_pane_caches = panes::TabPaneCaches::rebuild(
             pane_manifest,
-            &self.tab_id_by_position,
-            &self.focus_context_by_tab,
+            self.tab_identity.tab_id_by_position(),
+            &self.tab_pane_caches.focus_context_by_tab,
         );
-        self.focused_terminal_pane_by_tab =
-            panes::build_focused_terminal_pane_by_tab(pane_manifest, &self.tab_id_by_position);
-        self.fallback_terminal_pane_by_tab =
-            panes::build_fallback_terminal_pane_by_tab(pane_manifest, &self.tab_id_by_position);
-        self.terminal_panes_by_tab =
-            panes::build_terminal_panes_by_tab(pane_manifest, &self.tab_id_by_position);
-        self.zjstatus_plugin_id_by_tab =
-            panes::build_zjstatus_plugin_id_by_tab(pane_manifest, &self.tab_id_by_position);
         self.workspace_status_pipe_payload_by_plugin
-            .retain(|plugin_id, _| {
-                self.zjstatus_plugin_id_by_tab
-                    .values()
-                    .any(|id| id == plugin_id)
-            });
-        self.user_pane_count_by_tab =
-            panes::build_user_pane_count_by_tab(pane_manifest, &self.tab_id_by_position);
+            .retain(|plugin_id, _| self.tab_pane_caches.has_zjstatus_plugin_id(*plugin_id));
         self.reconcile_sidebar_yazi_state();
         self.reconcile_ai_pane_activity_panes();
     }
 
     fn retain_tab_local_pane_state_for_current_tabs(&mut self) {
-        let current_tab_ids = self
-            .tab_position_by_id
-            .keys()
-            .copied()
-            .collect::<HashSet<_>>();
+        let current_tab_ids = self.tab_identity.current_tab_ids();
         if current_tab_ids.is_empty() {
             self.last_pane_manifest = None;
         }
         self.last_known_layout_variant_by_tab
             .borrow_mut()
             .retain(|tab_id, _| current_tab_ids.contains(tab_id));
-        retain_current_tab_state(&mut self.focus_context_by_tab, &current_tab_ids);
-        retain_current_tab_state(&mut self.focused_terminal_pane_by_tab, &current_tab_ids);
-        retain_current_tab_state(&mut self.fallback_terminal_pane_by_tab, &current_tab_ids);
-        retain_current_tab_state(&mut self.managed_panes_by_tab, &current_tab_ids);
-        retain_current_tab_state(&mut self.terminal_panes_by_tab, &current_tab_ids);
-        retain_current_tab_state(&mut self.zjstatus_plugin_id_by_tab, &current_tab_ids);
-        retain_current_tab_state(&mut self.user_pane_count_by_tab, &current_tab_ids);
+        self.tab_pane_caches.retain_current_tabs(&current_tab_ids);
         retain_current_tab_state(&mut self.sidebar_yazi_state_by_tab, &current_tab_ids);
     }
 
@@ -376,7 +333,7 @@ impl State {
             return None;
         }
 
-        let Some(active_tab_id) = self.active_tab_id else {
+        let Some(active_tab_id) = self.tab_identity.active_tab_id() else {
             self.respond(pipe_message, RESULT_NOT_READY);
             return None;
         };

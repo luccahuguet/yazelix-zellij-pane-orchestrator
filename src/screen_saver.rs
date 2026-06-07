@@ -101,7 +101,8 @@ impl State {
         self.screen_saver_restore_floating_layer = hide_floating_panes(None).unwrap_or(false);
 
         let workspace_root = self
-            .active_tab_id
+            .tab_identity
+            .active_tab_id()
             .and_then(|tab_id| self.workspace_state_by_tab.get(&tab_id))
             .map(|state| state.root.as_str());
         let command_to_run = CommandToRun {
