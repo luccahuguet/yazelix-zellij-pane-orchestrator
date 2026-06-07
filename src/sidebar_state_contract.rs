@@ -5,9 +5,9 @@ pub fn retain_tab_local_sidebar_pane_state<S>(
     sidebar_pane_id_by_tab: &HashMap<usize, String>,
     state_pane_id: impl Fn(&S) -> &str,
 ) {
-    state_by_tab.retain(|tab_position, state| {
+    state_by_tab.retain(|tab_id, state| {
         sidebar_pane_id_by_tab
-            .get(tab_position)
+            .get(tab_id)
             .map(|pane_id| pane_id == state_pane_id(state))
             .unwrap_or(false)
     });
@@ -19,9 +19,9 @@ pub fn find_tab_for_sidebar_pane_id(
 ) -> Option<usize> {
     sidebar_pane_id_by_tab
         .iter()
-        .find_map(|(tab_position, candidate_pane_id)| {
+        .find_map(|(tab_id, candidate_pane_id)| {
             if candidate_pane_id == pane_id {
-                Some(*tab_position)
+                Some(*tab_id)
             } else {
                 None
             }

@@ -17,33 +17,33 @@ use crate::{
 
 impl State {
     pub(crate) fn toggle_agent_sidebar(&self, pipe_message: &PipeMessage) {
-        let Some(active_tab_position) = self.ensure_action_ready(pipe_message) else {
+        let Some(active_tab_id) = self.ensure_action_ready(pipe_message) else {
             return;
         };
 
         if let Some(agent_pane) = self
             .managed_panes_by_tab
-            .get(&active_tab_position)
+            .get(&active_tab_id)
             .and_then(|managed_tab_panes| managed_tab_panes.agent)
         {
             let agent_is_focused = self
                 .focused_terminal_pane_by_tab
-                .get(&active_tab_position)
+                .get(&active_tab_id)
                 .copied()
                 == Some(agent_pane.pane_id);
 
             if agent_is_focused {
                 if self
-                    .set_agent_state(active_tab_position, AgentState::Closed)
+                    .set_agent_state(active_tab_id, AgentState::Closed)
                     .is_none()
                 {
                     self.respond(pipe_message, RESULT_UNKNOWN_LAYOUT);
                     return;
                 }
-                self.focus_non_agent_after_hide(active_tab_position);
+                self.focus_non_agent_after_hide(active_tab_id);
             } else {
                 if let Err(result) =
-                    self.open_existing_agent_sidebar(active_tab_position, agent_pane.pane_id)
+                    self.open_existing_agent_sidebar(active_tab_id, agent_pane.pane_id)
                 {
                     self.respond(pipe_message, result);
                     return;
@@ -54,7 +54,7 @@ impl State {
             return;
         }
 
-        if let Err(result) = self.create_agent_sidebar(active_tab_position) {
+        if let Err(result) = self.create_agent_sidebar(active_tab_id) {
             self.respond(pipe_message, result);
             return;
         }
@@ -62,11 +62,11 @@ impl State {
     }
 
     pub(crate) fn toggle_editor_right_sidebar_focus(&self, pipe_message: &PipeMessage) {
-        let Some(active_tab_position) = self.ensure_action_ready(pipe_message) else {
+        let Some(active_tab_id) = self.ensure_action_ready(pipe_message) else {
             return;
         };
 
-        let Some(managed_tab_panes) = self.managed_panes_by_tab.get(&active_tab_position) else {
+        let Some(managed_tab_panes) = self.managed_panes_by_tab.get(&active_tab_id) else {
             self.respond(pipe_message, RESULT_MISSING);
             return;
         };
@@ -75,15 +75,15 @@ impl State {
             .agent
             .map(|agent_pane| {
                 self.focused_terminal_pane_by_tab
-                    .get(&active_tab_position)
+                    .get(&active_tab_id)
                     .copied()
                     == Some(agent_pane.pane_id)
             })
             .unwrap_or(false);
-        let agent_is_closed = self.agent_is_closed(active_tab_position).unwrap_or(false);
+        let agent_is_closed = self.agent_is_closed(active_tab_id).unwrap_or(false);
         let has_focus_fallback = self
             .fallback_terminal_pane_by_tab
-            .get(&active_tab_position)
+            .get(&active_tab_id)
             .is_some();
 
         match resolve_agent_focus_toggle(
@@ -104,7 +104,7 @@ impl State {
             AgentFocusTogglePlan::FocusFallback => {
                 if let Some(fallback_pane) = self
                     .fallback_terminal_pane_by_tab
-                    .get(&active_tab_position)
+                    .get(&active_tab_id)
                     .copied()
                 {
                     focus_pane_with_id(fallback_pane, false, false);
@@ -123,8 +123,7 @@ impl State {
             }
             AgentFocusTogglePlan::OpenAndFocusAgent => {
                 if let Some(agent_pane) = managed_tab_panes.agent {
-                    match self.open_existing_agent_sidebar(active_tab_position, agent_pane.pane_id)
-                    {
+                    match self.open_existing_agent_sidebar(active_tab_id, agent_pane.pane_id) {
                         Ok(()) => self.respond(pipe_message, RESULT_FOCUSED_AGENT),
                         Err(result) => self.respond(pipe_message, result),
                     }
@@ -133,7 +132,7 @@ impl State {
                 }
             }
             AgentFocusTogglePlan::CreateAndFocusAgent => {
-                match self.create_agent_sidebar(active_tab_position) {
+                match self.create_agent_sidebar(active_tab_id) {
                     Ok(()) => self.respond(pipe_message, RESULT_FOCUSED_AGENT),
                     Err(result) => self.respond(pipe_message, result),
                 }
@@ -142,7 +141,7 @@ impl State {
         }
     }
 
-    fn create_agent_sidebar(&self, active_tab_position: usize) -> Result<(), &'static str> {
+    fn create_agent_sidebar(&self, active_tab_id: usize) -> Result<(), &'static str> {
         let Some(right_sidebar_command) = self.right_sidebar_command.as_ref() else {
             return Err(RESULT_MISSING);
         };
@@ -156,16 +155,16 @@ impl State {
         };
 
         rename_pane_with_id(agent_pane_id, AGENT_TITLE);
-        self.open_existing_agent_sidebar(active_tab_position, agent_pane_id)
+        self.open_existing_agent_sidebar(active_tab_id, agent_pane_id)
     }
 
     fn open_existing_agent_sidebar(
         &self,
-        active_tab_position: usize,
+        active_tab_id: usize,
         agent_pane_id: PaneId,
     ) -> Result<(), &'static str> {
         if self
-            .set_agent_state(active_tab_position, AgentState::Open)
+            .set_agent_state(active_tab_id, AgentState::Open)
             .is_none()
         {
             return Err(RESULT_UNKNOWN_LAYOUT);
@@ -176,11 +175,11 @@ impl State {
         Ok(())
     }
 
-    fn focus_non_agent_after_hide(&self, active_tab_position: usize) {
+    fn focus_non_agent_after_hide(&self, active_tab_id: usize) {
         sleep(Duration::from_millis(COMMAND_STEP_DELAY_MS));
         if let Some(editor_pane) = self
             .managed_panes_by_tab
-            .get(&active_tab_position)
+            .get(&active_tab_id)
             .and_then(|managed_tab_panes| managed_tab_panes.editor)
         {
             focus_pane_with_id(editor_pane.pane_id, false, false);
@@ -189,17 +188,17 @@ impl State {
 
         if let Some(fallback_pane) = self
             .fallback_terminal_pane_by_tab
-            .get(&active_tab_position)
+            .get(&active_tab_id)
             .copied()
         {
             focus_pane_with_id(fallback_pane, false, false);
         }
     }
 
-    pub(crate) fn move_agent_right_after_layout_settle(&self, active_tab_position: usize) {
+    pub(crate) fn move_agent_right_after_layout_settle(&self, active_tab_id: usize) {
         if let Some(agent_pane) = self
             .managed_panes_by_tab
-            .get(&active_tab_position)
+            .get(&active_tab_id)
             .and_then(|managed_tab_panes| managed_tab_panes.agent)
         {
             self.move_agent_pane_right_after_layout_settle(agent_pane.pane_id);

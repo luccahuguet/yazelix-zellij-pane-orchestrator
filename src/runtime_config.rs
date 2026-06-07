@@ -16,7 +16,7 @@ impl State {
             self.respond(pipe_message, RESULT_DENIED);
             return;
         }
-        if self.active_tab_position.is_none() {
+        if self.active_tab_id.is_none() {
             self.respond(pipe_message, RESULT_NOT_READY);
             return;
         }

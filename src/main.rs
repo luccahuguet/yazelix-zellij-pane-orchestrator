@@ -25,6 +25,10 @@ use yazelix_zellij_pane_orchestrator::layout_state_contract::{
 use yazelix_zellij_pane_orchestrator::right_sidebar_command_contract::RightSidebarCommandConfig;
 use yazelix_zellij_pane_orchestrator::screen_saver_contract::ScreenSaverConfig;
 use yazelix_zellij_pane_orchestrator::status_bar_cache_contract::StatusBarCacheRuntime;
+use yazelix_zellij_pane_orchestrator::tab_identity_contract::{
+    active_tab_id, active_tab_position, retain_current_tab_state, tab_id_by_position,
+    tab_position_by_id,
+};
 use yazelix_zellij_pane_orchestrator::timer_schedule_contract::next_timer_delay;
 use zellij_tile::prelude::*;
 
@@ -47,6 +51,9 @@ pub(crate) const SWAP_LAYOUT_STEP_DELAY_MS: u64 = 1;
 #[derive(Default)]
 struct State {
     active_tab_position: Option<usize>,
+    active_tab_id: Option<usize>,
+    tab_id_by_position: HashMap<usize, usize>,
+    tab_position_by_id: HashMap<usize, usize>,
     active_swap_layout_name_by_tab: HashMap<usize, Option<String>>,
     last_known_layout_variant_by_tab: RefCell<HashMap<usize, LayoutVariant>>,
     focus_context_by_tab: HashMap<usize, FocusContext>,
@@ -56,10 +63,11 @@ struct State {
     terminal_panes_by_tab: HashMap<usize, Vec<panes::TerminalPaneLayout>>,
     zjstatus_plugin_id_by_tab: HashMap<usize, u32>,
     user_pane_count_by_tab: HashMap<usize, usize>,
+    last_pane_manifest: Option<PaneManifest>,
     workspace_state_by_tab: HashMap<usize, WorkspaceState>,
     sidebar_yazi_state_by_tab: HashMap<usize, sidebar_yazi::SidebarYaziState>,
     ai_pane_activity_by_tab: HashMap<usize, Vec<SessionAiPaneActivity>>,
-    seen_tab_positions: HashSet<usize>,
+    seen_tab_ids: HashSet<usize>,
     initial_workspace_state: Option<WorkspaceState>,
     runtime_dir: PathBuf,
     screen_saver_config: ScreenSaverConfig,
@@ -139,8 +147,10 @@ impl ZellijPlugin for State {
         self.record_orchestrator_event(heartbeat::event_kind(&event));
         match event {
             Event::TabUpdate(tabs) => {
-                self.active_tab_position =
-                    tabs.iter().find(|tab| tab.active).map(|tab| tab.position);
+                self.active_tab_position = active_tab_position(&tabs);
+                self.active_tab_id = active_tab_id(&tabs);
+                self.tab_id_by_position = tab_id_by_position(&tabs);
+                self.tab_position_by_id = tab_position_by_id(&tabs);
                 self.reconcile_workspace_state(&tabs);
                 self.reconcile_ai_pane_activity_tabs(&tabs);
                 {
@@ -152,35 +162,22 @@ impl ZellijPlugin for State {
                             .as_deref()
                             .and_then(LayoutVariant::from_layout_name)
                         {
-                            last_known_layout_variant_by_tab.insert(tab.position, layout_variant);
+                            last_known_layout_variant_by_tab.insert(tab.tab_id, layout_variant);
                         }
                     }
                 }
                 self.active_swap_layout_name_by_tab = tabs
                     .into_iter()
-                    .map(|tab| (tab.position, tab.active_swap_layout_name))
+                    .map(|tab| (tab.tab_id, tab.active_swap_layout_name))
                     .collect();
+                self.retain_tab_local_pane_state_for_current_tabs();
+                if let Some(pane_manifest) = self.last_pane_manifest.clone() {
+                    self.rebuild_tab_local_pane_state(&pane_manifest);
+                }
             }
             Event::PaneUpdate(pane_manifest) => {
-                self.managed_panes_by_tab = panes::build_managed_panes_by_tab(&pane_manifest);
-                self.focus_context_by_tab =
-                    panes::build_focus_context_by_tab(&pane_manifest, &self.focus_context_by_tab);
-                self.focused_terminal_pane_by_tab =
-                    panes::build_focused_terminal_pane_by_tab(&pane_manifest);
-                self.fallback_terminal_pane_by_tab =
-                    panes::build_fallback_terminal_pane_by_tab(&pane_manifest);
-                self.terminal_panes_by_tab = panes::build_terminal_panes_by_tab(&pane_manifest);
-                self.zjstatus_plugin_id_by_tab =
-                    panes::build_zjstatus_plugin_id_by_tab(&pane_manifest);
-                self.workspace_status_pipe_payload_by_plugin
-                    .retain(|plugin_id, _| {
-                        self.zjstatus_plugin_id_by_tab
-                            .values()
-                            .any(|id| id == plugin_id)
-                    });
-                self.user_pane_count_by_tab = panes::build_user_pane_count_by_tab(&pane_manifest);
-                self.reconcile_sidebar_yazi_state();
-                self.reconcile_ai_pane_activity_panes();
+                self.last_pane_manifest = Some(pane_manifest.clone());
+                self.rebuild_tab_local_pane_state(&pane_manifest);
             }
             Event::PermissionRequestResult(status) => {
                 self.permissions_granted = status == PermissionStatus::Granted;
@@ -313,18 +310,78 @@ impl ZellijPlugin for State {
 }
 
 impl State {
+    fn rebuild_tab_local_pane_state(&mut self, pane_manifest: &PaneManifest) {
+        if self.tab_id_by_position.is_empty()
+            || pane_manifest.panes.len() != self.tab_id_by_position.len()
+            || pane_manifest
+                .panes
+                .keys()
+                .any(|tab_position| !self.tab_id_by_position.contains_key(tab_position))
+        {
+            return;
+        }
+
+        self.managed_panes_by_tab =
+            panes::build_managed_panes_by_tab(pane_manifest, &self.tab_id_by_position);
+        self.focus_context_by_tab = panes::build_focus_context_by_tab(
+            pane_manifest,
+            &self.tab_id_by_position,
+            &self.focus_context_by_tab,
+        );
+        self.focused_terminal_pane_by_tab =
+            panes::build_focused_terminal_pane_by_tab(pane_manifest, &self.tab_id_by_position);
+        self.fallback_terminal_pane_by_tab =
+            panes::build_fallback_terminal_pane_by_tab(pane_manifest, &self.tab_id_by_position);
+        self.terminal_panes_by_tab =
+            panes::build_terminal_panes_by_tab(pane_manifest, &self.tab_id_by_position);
+        self.zjstatus_plugin_id_by_tab =
+            panes::build_zjstatus_plugin_id_by_tab(pane_manifest, &self.tab_id_by_position);
+        self.workspace_status_pipe_payload_by_plugin
+            .retain(|plugin_id, _| {
+                self.zjstatus_plugin_id_by_tab
+                    .values()
+                    .any(|id| id == plugin_id)
+            });
+        self.user_pane_count_by_tab =
+            panes::build_user_pane_count_by_tab(pane_manifest, &self.tab_id_by_position);
+        self.reconcile_sidebar_yazi_state();
+        self.reconcile_ai_pane_activity_panes();
+    }
+
+    fn retain_tab_local_pane_state_for_current_tabs(&mut self) {
+        let current_tab_ids = self
+            .tab_position_by_id
+            .keys()
+            .copied()
+            .collect::<HashSet<_>>();
+        if current_tab_ids.is_empty() {
+            self.last_pane_manifest = None;
+        }
+        self.last_known_layout_variant_by_tab
+            .borrow_mut()
+            .retain(|tab_id, _| current_tab_ids.contains(tab_id));
+        retain_current_tab_state(&mut self.focus_context_by_tab, &current_tab_ids);
+        retain_current_tab_state(&mut self.focused_terminal_pane_by_tab, &current_tab_ids);
+        retain_current_tab_state(&mut self.fallback_terminal_pane_by_tab, &current_tab_ids);
+        retain_current_tab_state(&mut self.managed_panes_by_tab, &current_tab_ids);
+        retain_current_tab_state(&mut self.terminal_panes_by_tab, &current_tab_ids);
+        retain_current_tab_state(&mut self.zjstatus_plugin_id_by_tab, &current_tab_ids);
+        retain_current_tab_state(&mut self.user_pane_count_by_tab, &current_tab_ids);
+        retain_current_tab_state(&mut self.sidebar_yazi_state_by_tab, &current_tab_ids);
+    }
+
     pub(crate) fn ensure_action_ready(&self, pipe_message: &PipeMessage) -> Option<usize> {
         if !self.permissions_granted {
             self.respond(pipe_message, RESULT_DENIED);
             return None;
         }
 
-        let Some(active_tab_position) = self.active_tab_position else {
+        let Some(active_tab_id) = self.active_tab_id else {
             self.respond(pipe_message, RESULT_NOT_READY);
             return None;
         };
 
-        Some(active_tab_position)
+        Some(active_tab_id)
     }
 
     pub(crate) fn respond(&self, pipe_message: &PipeMessage, result: &str) {

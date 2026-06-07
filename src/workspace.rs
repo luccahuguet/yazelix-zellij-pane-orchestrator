@@ -1,9 +1,11 @@
-use std::collections::HashSet;
 use std::path::Path;
 use std::thread::sleep;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use yazelix_zellij_pane_orchestrator::tab_identity_contract::{
+    active_tab_id as select_active_tab_id, current_tab_ids as collect_current_tab_ids,
+};
 use zellij_tile::prelude::*;
 
 use crate::panes::pane_id_to_string;
@@ -57,20 +59,17 @@ struct OpenTerminalRequest {
 
 impl State {
     pub(crate) fn reconcile_workspace_state(&mut self, tabs: &[TabInfo]) {
-        let current_tab_positions: HashSet<usize> = tabs.iter().map(|tab| tab.position).collect();
+        let current_tab_ids = collect_current_tab_ids(tabs);
         self.workspace_state_by_tab
-            .retain(|tab_position, _| current_tab_positions.contains(tab_position));
-        self.seen_tab_positions
-            .retain(|tab_position| current_tab_positions.contains(tab_position));
+            .retain(|tab_id, _| current_tab_ids.contains(tab_id));
+        self.seen_tab_ids
+            .retain(|tab_id| current_tab_ids.contains(tab_id));
 
-        let active_tab_position = tabs.iter().find(|tab| tab.active).map(|tab| tab.position);
+        let active_tab_id = select_active_tab_id(tabs);
 
-        if let Some(active_tab_position) = active_tab_position {
-            let is_new_tab = !self.seen_tab_positions.contains(&active_tab_position);
-            if !self
-                .workspace_state_by_tab
-                .contains_key(&active_tab_position)
-            {
+        if let Some(active_tab_id) = active_tab_id {
+            let is_new_tab = !self.seen_tab_ids.contains(&active_tab_id);
+            if !self.workspace_state_by_tab.contains_key(&active_tab_id) {
                 let inherited_workspace_state = if is_new_tab {
                     self.initial_workspace_state.clone()
                 } else if self.workspace_state_by_tab.is_empty() {
@@ -81,16 +80,20 @@ impl State {
 
                 if let Some(workspace_state) = inherited_workspace_state {
                     self.workspace_state_by_tab
-                        .insert(active_tab_position, workspace_state);
+                        .insert(active_tab_id, workspace_state);
                 }
             }
         }
 
-        self.seen_tab_positions = current_tab_positions;
+        self.seen_tab_ids = current_tab_ids;
     }
 
     pub(crate) fn retarget_workspace(&mut self, pipe_message: &PipeMessage) {
-        let Some(active_tab_position) = self.ensure_action_ready(pipe_message) else {
+        let Some(active_tab_id) = self.ensure_action_ready(pipe_message) else {
+            return;
+        };
+        let Some(active_tab_position) = self.active_tab_position else {
+            self.respond(pipe_message, RESULT_MISSING);
             return;
         };
 
@@ -120,10 +123,10 @@ impl State {
             &tab_name_from_workspace_root(&workspace_state.root),
         );
         self.workspace_state_by_tab
-            .insert(active_tab_position, workspace_state.clone());
+            .insert(active_tab_id, workspace_state.clone());
 
         if let Some(registration) = workspace_retarget_request.sidebar_yazi {
-            self.register_inline_sidebar_yazi_state(active_tab_position, registration);
+            self.register_inline_sidebar_yazi_state(active_tab_id, registration);
         }
 
         if workspace_retarget_request.cd_focused_pane {
@@ -153,7 +156,7 @@ impl State {
 
                 let Some(editor_pane) = self
                     .managed_panes_by_tab
-                    .get(&active_tab_position)
+                    .get(&active_tab_id)
                     .and_then(|managed_tab_panes| managed_tab_panes.editor)
                 else {
                     return "missing".to_string();
@@ -168,7 +171,7 @@ impl State {
             })
             .unwrap_or_else(|| "skipped".to_string());
 
-        let sidebar_yazi_state = self.get_active_sidebar_yazi_state_snapshot(active_tab_position);
+        let sidebar_yazi_state = self.get_active_sidebar_yazi_state_snapshot(active_tab_id);
         let response = WorkspaceRetargetResponse {
             status: RESULT_OK.to_string(),
             editor_status,
@@ -184,7 +187,7 @@ impl State {
 
     fn register_inline_sidebar_yazi_state(
         &mut self,
-        active_tab_position: usize,
+        active_tab_id: usize,
         registration: WorkspaceSidebarYaziRegistration,
     ) {
         let pane_id = registration.pane_id.trim().to_string();
@@ -196,7 +199,7 @@ impl State {
 
         let expected_sidebar_pane_id = self
             .managed_panes_by_tab
-            .get(&active_tab_position)
+            .get(&active_tab_id)
             .and_then(|managed_tab_panes| managed_tab_panes.sidebar)
             .and_then(|sidebar| pane_id_to_string(Some(sidebar.pane_id)));
         if expected_sidebar_pane_id.as_deref() != Some(pane_id.as_str()) {
@@ -204,7 +207,7 @@ impl State {
         }
 
         self.sidebar_yazi_state_by_tab.insert(
-            active_tab_position,
+            active_tab_id,
             SidebarYaziState {
                 pane_id,
                 yazi_id,
@@ -214,7 +217,7 @@ impl State {
     }
 
     pub(crate) fn open_terminal_in_cwd(&self, pipe_message: &PipeMessage) {
-        let Some(_active_tab_position) = self.ensure_action_ready(pipe_message) else {
+        let Some(_active_tab_id) = self.ensure_action_ready(pipe_message) else {
             return;
         };
 
@@ -236,13 +239,13 @@ impl State {
     }
 
     pub(crate) fn open_workspace_terminal(&self, pipe_message: &PipeMessage) {
-        let Some(active_tab_position) = self.ensure_action_ready(pipe_message) else {
+        let Some(active_tab_id) = self.ensure_action_ready(pipe_message) else {
             return;
         };
 
         let Some(workspace_state) = self
             .workspace_state_by_tab
-            .get(&active_tab_position)
+            .get(&active_tab_id)
             .cloned()
             .or_else(|| self.initial_workspace_state.clone())
         else {

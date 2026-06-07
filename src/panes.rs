@@ -83,12 +83,16 @@ struct MaintainerDebugEditorState {
 
 pub(crate) fn build_managed_panes_by_tab(
     pane_manifest: &PaneManifest,
+    tab_id_by_position: &HashMap<usize, usize>,
 ) -> HashMap<usize, ManagedTabPanes> {
     let mut managed_panes_by_tab = HashMap::new();
 
     for (tab_position, panes) in &pane_manifest.panes {
+        let Some(tab_id) = tab_id_by_position.get(tab_position).copied() else {
+            continue;
+        };
         managed_panes_by_tab.insert(
-            *tab_position,
+            tab_id,
             ManagedTabPanes {
                 editor: select_managed_terminal_pane(panes, EDITOR_TITLE),
                 sidebar: select_managed_terminal_pane(panes, SIDEBAR_TITLE),
@@ -100,38 +104,46 @@ pub(crate) fn build_managed_panes_by_tab(
     managed_panes_by_tab
 }
 
-pub(crate) fn build_user_pane_count_by_tab(pane_manifest: &PaneManifest) -> HashMap<usize, usize> {
+pub(crate) fn build_user_pane_count_by_tab(
+    pane_manifest: &PaneManifest,
+    tab_id_by_position: &HashMap<usize, usize>,
+) -> HashMap<usize, usize> {
     pane_manifest
         .panes
         .iter()
-        .map(|(tab_position, panes)| {
+        .filter_map(|(tab_position, panes)| {
+            let tab_id = tab_id_by_position.get(tab_position).copied()?;
             let user_pane_count = panes
                 .iter()
                 .filter(|pane| !pane.is_plugin)
                 .filter(|pane| !pane.exited)
                 .count();
-            (*tab_position, user_pane_count)
+            Some((tab_id, user_pane_count))
         })
         .collect()
 }
 
 pub(crate) fn build_focus_context_by_tab(
     pane_manifest: &PaneManifest,
+    tab_id_by_position: &HashMap<usize, usize>,
     previous_focus_context_by_tab: &HashMap<usize, FocusContext>,
 ) -> HashMap<usize, FocusContext> {
     let mut focus_context_by_tab = HashMap::new();
 
     for (tab_position, panes) in &pane_manifest.panes {
+        let Some(tab_id) = tab_id_by_position.get(tab_position).copied() else {
+            continue;
+        };
         let focused_pane = panes.iter().find(|pane| pane.is_focused && !pane.is_plugin);
         let previous_focus_context = previous_focus_context_by_tab
-            .get(tab_position)
+            .get(&tab_id)
             .copied()
             .unwrap_or(FocusContext::Other);
         let focus_context = resolve_focus_context(
             focused_pane.map(|pane| pane.title.as_str()),
             previous_focus_context,
         );
-        focus_context_by_tab.insert(*tab_position, focus_context);
+        focus_context_by_tab.insert(tab_id, focus_context);
     }
 
     focus_context_by_tab
@@ -139,50 +151,54 @@ pub(crate) fn build_focus_context_by_tab(
 
 pub(crate) fn build_focused_terminal_pane_by_tab(
     pane_manifest: &PaneManifest,
+    tab_id_by_position: &HashMap<usize, usize>,
 ) -> HashMap<usize, PaneId> {
     pane_manifest
         .panes
         .iter()
         .filter_map(|(tab_position, panes)| {
+            let tab_id = tab_id_by_position.get(tab_position).copied()?;
             panes
                 .iter()
                 .find(|pane| pane.is_focused && !pane.is_plugin && !pane.exited)
-                .map(|pane| (*tab_position, PaneId::Terminal(pane.id)))
+                .map(|pane| (tab_id, PaneId::Terminal(pane.id)))
         })
         .collect()
 }
 
 pub(crate) fn build_fallback_terminal_pane_by_tab(
     pane_manifest: &PaneManifest,
+    tab_id_by_position: &HashMap<usize, usize>,
 ) -> HashMap<usize, PaneId> {
     pane_manifest
         .panes
         .iter()
         .filter_map(|(tab_position, panes)| {
+            let tab_id = tab_id_by_position.get(tab_position).copied()?;
             let editor_pane = select_managed_terminal_pane(panes, EDITOR_TITLE);
-            editor_pane
-                .map(|pane| (*tab_position, pane.pane_id))
-                .or_else(|| {
-                    panes
-                        .iter()
-                        .find(|pane| {
-                            !pane.is_plugin
-                                && !pane.exited
-                                && !matches!(pane.title.trim(), SIDEBAR_TITLE | AGENT_TITLE)
-                        })
-                        .map(|pane| (*tab_position, PaneId::Terminal(pane.id)))
-                })
+            editor_pane.map(|pane| (tab_id, pane.pane_id)).or_else(|| {
+                panes
+                    .iter()
+                    .find(|pane| {
+                        !pane.is_plugin
+                            && !pane.exited
+                            && !matches!(pane.title.trim(), SIDEBAR_TITLE | AGENT_TITLE)
+                    })
+                    .map(|pane| (tab_id, PaneId::Terminal(pane.id)))
+            })
         })
         .collect()
 }
 
 pub(crate) fn build_terminal_panes_by_tab(
     pane_manifest: &PaneManifest,
+    tab_id_by_position: &HashMap<usize, usize>,
 ) -> HashMap<usize, Vec<TerminalPaneLayout>> {
     pane_manifest
         .panes
         .iter()
-        .map(|(tab_position, panes)| {
+        .filter_map(|(tab_position, panes)| {
+            let tab_id = tab_id_by_position.get(tab_position).copied()?;
             let terminal_panes = panes
                 .iter()
                 .filter(|pane| !pane.is_plugin && !pane.exited)
@@ -198,16 +214,20 @@ pub(crate) fn build_terminal_panes_by_tab(
                     pane_rows: pane.pane_rows,
                 })
                 .collect();
-            (*tab_position, terminal_panes)
+            Some((tab_id, terminal_panes))
         })
         .collect()
 }
 
-pub(crate) fn build_zjstatus_plugin_id_by_tab(pane_manifest: &PaneManifest) -> HashMap<usize, u32> {
+pub(crate) fn build_zjstatus_plugin_id_by_tab(
+    pane_manifest: &PaneManifest,
+    tab_id_by_position: &HashMap<usize, usize>,
+) -> HashMap<usize, u32> {
     pane_manifest
         .panes
         .iter()
         .filter_map(|(tab_position, panes)| {
+            let tab_id = tab_id_by_position.get(tab_position).copied()?;
             panes
                 .iter()
                 .find(|pane| {
@@ -219,7 +239,7 @@ pub(crate) fn build_zjstatus_plugin_id_by_tab(pane_manifest: &PaneManifest) -> H
                             .map(is_zjstatus_plugin_url)
                             .unwrap_or(false)
                 })
-                .map(|pane| (*tab_position, pane.id))
+                .map(|pane| (tab_id, pane.id))
         })
         .collect()
 }
@@ -230,20 +250,17 @@ fn is_zjstatus_plugin_url(plugin_url: &str) -> bool {
 }
 
 impl State {
-    fn collect_active_tab_read_state(
-        &self,
-        active_tab_position: Option<usize>,
-    ) -> ActiveTabReadState {
-        let active_swap_layout_name = active_tab_position
-            .and_then(|tab_position| self.active_swap_layout_name_by_tab.get(&tab_position))
+    fn collect_active_tab_read_state(&self, active_tab_id: Option<usize>) -> ActiveTabReadState {
+        let active_swap_layout_name = active_tab_id
+            .and_then(|tab_id| self.active_swap_layout_name_by_tab.get(&tab_id))
             .cloned()
             .flatten();
-        let workspace_root = active_tab_position
-            .and_then(|tab_position| self.workspace_state_by_tab.get(&tab_position))
+        let workspace_root = active_tab_id
+            .and_then(|tab_id| self.workspace_state_by_tab.get(&tab_id))
             .map(|workspace_state| workspace_state.root.clone())
             .or_else(|| self.initial_workspace_state.clone().map(|state| state.root));
-        let workspace_source = active_tab_position
-            .and_then(|tab_position| self.workspace_state_by_tab.get(&tab_position))
+        let workspace_source = active_tab_id
+            .and_then(|tab_id| self.workspace_state_by_tab.get(&tab_id))
             .map(|workspace_state| match workspace_state.source {
                 WorkspaceStateSource::Bootstrap => "bootstrap".to_string(),
                 WorkspaceStateSource::Explicit => "explicit".to_string(),
@@ -257,14 +274,14 @@ impl State {
                     })
             });
         let explicit_workspace = match (
-            active_tab_position,
+            active_tab_id,
             workspace_root.clone(),
             workspace_source.clone(),
         ) {
-            (Some(tab_position), Some(root), Some(source))
+            (Some(tab_id), Some(root), Some(source))
                 if matches!(
                     self.workspace_state_by_tab
-                        .get(&tab_position)
+                        .get(&tab_id)
                         .map(|workspace_state| workspace_state.source),
                     Some(WorkspaceStateSource::Explicit)
                 ) =>
@@ -279,27 +296,27 @@ impl State {
             }
             _ => None,
         };
-        let editor_pane = active_tab_position
-            .and_then(|tab_position| self.managed_panes_by_tab.get(&tab_position))
+        let editor_pane = active_tab_id
+            .and_then(|tab_id| self.managed_panes_by_tab.get(&tab_id))
             .and_then(|managed_tab_panes| managed_tab_panes.editor);
-        let sidebar_pane = active_tab_position
-            .and_then(|tab_position| self.managed_panes_by_tab.get(&tab_position))
+        let sidebar_pane = active_tab_id
+            .and_then(|tab_id| self.managed_panes_by_tab.get(&tab_id))
             .and_then(|managed_tab_panes| managed_tab_panes.sidebar);
-        let agent_pane = active_tab_position
-            .and_then(|tab_position| self.managed_panes_by_tab.get(&tab_position))
+        let agent_pane = active_tab_id
+            .and_then(|tab_id| self.managed_panes_by_tab.get(&tab_id))
             .and_then(|managed_tab_panes| managed_tab_panes.agent);
-        let sidebar_yazi_state = active_tab_position
-            .and_then(|tab_position| self.get_active_sidebar_yazi_state_snapshot(tab_position));
+        let sidebar_yazi_state =
+            active_tab_id.and_then(|tab_id| self.get_active_sidebar_yazi_state_snapshot(tab_id));
         let transient_panes = build_session_transient_panes(
-            active_tab_position
-                .and_then(|tab_position| self.terminal_panes_by_tab.get(&tab_position))
+            active_tab_id
+                .and_then(|tab_id| self.terminal_panes_by_tab.get(&tab_id))
                 .map(Vec::as_slice),
         );
-        let ai_pane_activity = active_tab_position
-            .map(|tab_position| self.get_active_ai_pane_activity_snapshot(tab_position))
+        let ai_pane_activity = active_tab_id
+            .map(|tab_id| self.get_active_ai_pane_activity_snapshot(tab_id))
             .unwrap_or_default();
-        let focus_context = match active_tab_position
-            .and_then(|tab_position| self.focus_context_by_tab.get(&tab_position).copied())
+        let focus_context = match active_tab_id
+            .and_then(|tab_id| self.focus_context_by_tab.get(&tab_id).copied())
             .unwrap_or(FocusContext::Other)
         {
             FocusContext::Editor => "editor",
@@ -318,10 +335,8 @@ impl State {
                 yazi_id: state.yazi_id.clone(),
                 cwd: state.cwd.clone(),
             }),
-            sidebar_collapsed: active_tab_position
-                .and_then(|tab_position| self.sidebar_is_closed(tab_position)),
-            agent_collapsed: active_tab_position
-                .and_then(|tab_position| self.agent_is_closed(tab_position)),
+            sidebar_collapsed: active_tab_id.and_then(|tab_id| self.sidebar_is_closed(tab_id)),
+            agent_collapsed: active_tab_id.and_then(|tab_id| self.agent_is_closed(tab_id)),
             focus_context: focus_context.to_string(),
             transient_panes,
             extensions: SessionStatusExtensions { ai_pane_activity },
@@ -330,20 +345,26 @@ impl State {
 
     pub(crate) fn active_tab_session_state_snapshot(
         &self,
-        active_tab_position: usize,
+        active_tab_id: usize,
     ) -> ActiveTabSessionStateV1 {
-        let read_state = self.collect_active_tab_read_state(Some(active_tab_position));
+        let active_tab_position = self
+            .tab_position_by_id
+            .get(&active_tab_id)
+            .copied()
+            .or(self.active_tab_position)
+            .unwrap_or(active_tab_id);
+        let read_state = self.collect_active_tab_read_state(Some(active_tab_id));
         build_active_tab_session_state_v1(active_tab_position, read_state)
     }
 
     pub(crate) fn smart_reveal(&self, pipe_message: &PipeMessage) {
-        let Some(active_tab_position) = self.ensure_action_ready(pipe_message) else {
+        let Some(active_tab_id) = self.ensure_action_ready(pipe_message) else {
             return;
         };
 
         let focus_context = self
             .focus_context_by_tab
-            .get(&active_tab_position)
+            .get(&active_tab_id)
             .copied()
             .unwrap_or(FocusContext::Other);
 
@@ -371,16 +392,16 @@ impl State {
         };
 
         let sidebar_is_closed = if matches!(pane_kind, ManagedPaneKind::Sidebar) {
-            self.active_tab_position
-                .and_then(|tab_position| self.sidebar_is_closed(tab_position))
+            self.active_tab_id
+                .and_then(|tab_id| self.sidebar_is_closed(tab_id))
                 .unwrap_or(false)
         } else {
             false
         };
 
         if sidebar_is_closed {
-            if let Some(active_tab_position) = self.active_tab_position {
-                self.open_sidebar_and_focus_after_layout_settle_for_tab(active_tab_position);
+            if let Some(active_tab_id) = self.active_tab_id {
+                self.open_sidebar_and_focus_after_layout_settle_for_tab(active_tab_id);
             } else {
                 self.open_sidebar_and_focus_after_layout_settle();
             }
@@ -391,21 +412,21 @@ impl State {
     }
 
     pub(crate) fn toggle_editor_sidebar_focus(&self, pipe_message: &PipeMessage) {
-        let Some(active_tab_position) = self.ensure_action_ready(pipe_message) else {
+        let Some(active_tab_id) = self.ensure_action_ready(pipe_message) else {
             return;
         };
 
-        let Some(managed_tab_panes) = self.managed_panes_by_tab.get(&active_tab_position) else {
+        let Some(managed_tab_panes) = self.managed_panes_by_tab.get(&active_tab_id) else {
             self.respond(pipe_message, RESULT_MISSING);
             return;
         };
 
         let focus_context = self
             .focus_context_by_tab
-            .get(&active_tab_position)
+            .get(&active_tab_id)
             .copied()
             .unwrap_or(FocusContext::Other);
-        let sidebar_is_closed = self.sidebar_is_closed(active_tab_position).unwrap_or(false);
+        let sidebar_is_closed = self.sidebar_is_closed(active_tab_id).unwrap_or(false);
         let plan = resolve_sidebar_focus_toggle(
             focus_context,
             managed_tab_panes.sidebar.is_some(),
@@ -432,7 +453,7 @@ impl State {
             }
             SidebarFocusTogglePlan::OpenAndFocusSidebar => {
                 if managed_tab_panes.sidebar.is_some() {
-                    self.open_sidebar_and_focus_after_layout_settle_for_tab(active_tab_position);
+                    self.open_sidebar_and_focus_after_layout_settle_for_tab(active_tab_id);
                     self.respond(pipe_message, RESULT_OPENED_SIDEBAR);
                 } else {
                     self.respond(pipe_message, RESULT_MISSING);
@@ -447,17 +468,17 @@ impl State {
         pipe_message: &PipeMessage,
         direction: HorizontalDirection,
     ) {
-        let Some(active_tab_position) = self.ensure_action_ready(pipe_message) else {
+        let Some(active_tab_id) = self.ensure_action_ready(pipe_message) else {
             return;
         };
 
-        let Some(terminal_panes) = self.terminal_panes_by_tab.get(&active_tab_position) else {
+        let Some(terminal_panes) = self.terminal_panes_by_tab.get(&active_tab_id) else {
             self.respond(pipe_message, RESULT_MISSING);
             return;
         };
 
-        let sidebar_is_closed = self.sidebar_is_closed(active_tab_position).unwrap_or(false);
-        let agent_is_closed = self.agent_is_closed(active_tab_position).unwrap_or(false);
+        let sidebar_is_closed = self.sidebar_is_closed(active_tab_id).unwrap_or(false);
+        let agent_is_closed = self.agent_is_closed(active_tab_id).unwrap_or(false);
         let pane_snapshots: Vec<HorizontalPaneSnapshot> = terminal_panes
             .iter()
             .map(|pane| HorizontalPaneSnapshot {
@@ -504,7 +525,7 @@ impl State {
 
     pub(crate) fn maintainer_debug_editor_state(&self, pipe_message: &PipeMessage) {
         let active_tab_position = self.active_tab_position;
-        let read_state = self.collect_active_tab_read_state(active_tab_position);
+        let read_state = self.collect_active_tab_read_state(self.active_tab_id);
 
         let state = MaintainerDebugEditorState {
             permissions_granted: self.permissions_granted,
@@ -542,10 +563,10 @@ impl State {
     }
 
     pub(crate) fn get_active_tab_session_state(&self, pipe_message: &PipeMessage) {
-        let Some(active_tab_position) = self.ensure_action_ready(pipe_message) else {
+        let Some(active_tab_id) = self.ensure_action_ready(pipe_message) else {
             return;
         };
-        let snapshot = self.active_tab_session_state_snapshot(active_tab_position);
+        let snapshot = self.active_tab_session_state_snapshot(active_tab_id);
 
         match serde_json::to_string(&snapshot) {
             Ok(serialized) => self.respond(pipe_message, &serialized),
@@ -558,17 +579,17 @@ impl State {
         pipe_message: &PipeMessage,
         pane_kind: ManagedPaneKind,
     ) -> Option<ManagedTerminalPane> {
-        let Some(active_tab_position) = self.ensure_action_ready(pipe_message) else {
+        let Some(active_tab_id) = self.ensure_action_ready(pipe_message) else {
             return None;
         };
 
-        let managed_pane = self
-            .managed_panes_by_tab
-            .get(&active_tab_position)
-            .and_then(|managed_tab_panes| match pane_kind {
-                ManagedPaneKind::Editor => managed_tab_panes.editor,
-                ManagedPaneKind::Sidebar => managed_tab_panes.sidebar,
-            });
+        let managed_pane =
+            self.managed_panes_by_tab
+                .get(&active_tab_id)
+                .and_then(|managed_tab_panes| match pane_kind {
+                    ManagedPaneKind::Editor => managed_tab_panes.editor,
+                    ManagedPaneKind::Sidebar => managed_tab_panes.sidebar,
+                });
 
         match managed_pane {
             Some(managed_pane) => Some(managed_pane),
@@ -580,13 +601,13 @@ impl State {
     }
 
     pub(crate) fn get_focused_terminal_pane(&self, pipe_message: &PipeMessage) -> Option<PaneId> {
-        let Some(active_tab_position) = self.ensure_action_ready(pipe_message) else {
+        let Some(active_tab_id) = self.ensure_action_ready(pipe_message) else {
             return None;
         };
 
         match self
             .focused_terminal_pane_by_tab
-            .get(&active_tab_position)
+            .get(&active_tab_id)
             .copied()
         {
             Some(pane_id) => Some(pane_id),

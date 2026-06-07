@@ -60,13 +60,13 @@ impl State {
             return;
         }
 
-        let Some(tab_position) = self.find_tab_position_for_sidebar_pane_id(&pane_id) else {
+        let Some(tab_id) = self.find_tab_id_for_sidebar_pane_id(&pane_id) else {
             self.respond(pipe_message, RESULT_MISSING);
             return;
         };
 
         self.sidebar_yazi_state_by_tab.insert(
-            tab_position,
+            tab_id,
             SidebarYaziState {
                 pane_id,
                 yazi_id,
@@ -78,16 +78,16 @@ impl State {
 
     pub(crate) fn get_active_sidebar_yazi_state_snapshot(
         &self,
-        active_tab_position: usize,
+        active_tab_id: usize,
     ) -> Option<&SidebarYaziState> {
-        let expected_pane_id = self
-            .managed_panes_by_tab
-            .get(&active_tab_position)
-            .and_then(|managed_tab_panes| {
-                pane_id_to_string(managed_tab_panes.sidebar.map(|pane| pane.pane_id))
-            })?;
+        let expected_pane_id =
+            self.managed_panes_by_tab
+                .get(&active_tab_id)
+                .and_then(|managed_tab_panes| {
+                    pane_id_to_string(managed_tab_panes.sidebar.map(|pane| pane.pane_id))
+                })?;
 
-        let sidebar_state = self.sidebar_yazi_state_by_tab.get(&active_tab_position)?;
+        let sidebar_state = self.sidebar_yazi_state_by_tab.get(&active_tab_id)?;
         if sidebar_state.pane_id == expected_pane_id {
             Some(sidebar_state)
         } else {
@@ -95,16 +95,16 @@ impl State {
         }
     }
 
-    fn find_tab_position_for_sidebar_pane_id(&self, pane_id: &str) -> Option<usize> {
+    fn find_tab_id_for_sidebar_pane_id(&self, pane_id: &str) -> Option<usize> {
         find_tab_for_sidebar_pane_id(&self.sidebar_pane_id_by_tab(), pane_id)
     }
 
     fn sidebar_pane_id_by_tab(&self) -> HashMap<usize, String> {
         self.managed_panes_by_tab
             .iter()
-            .filter_map(|(tab_position, managed_tab_panes)| {
+            .filter_map(|(tab_id, managed_tab_panes)| {
                 pane_id_to_string(managed_tab_panes.sidebar.map(|pane| pane.pane_id))
-                    .map(|pane_id| (*tab_position, pane_id))
+                    .map(|pane_id| (*tab_id, pane_id))
             })
             .collect()
     }

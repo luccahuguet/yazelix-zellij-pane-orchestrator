@@ -12,27 +12,27 @@ use crate::{State, RESULT_DENIED, RESULT_INVALID_PAYLOAD, RESULT_MISSING, RESULT
 
 impl State {
     pub(crate) fn reconcile_ai_pane_activity_tabs(&mut self, tabs: &[TabInfo]) {
-        let current_tab_positions = tabs.iter().map(|tab| tab.position).collect::<HashSet<_>>();
+        let current_tab_ids = tabs.iter().map(|tab| tab.tab_id).collect::<HashSet<_>>();
         self.ai_pane_activity_by_tab
-            .retain(|tab_position, _| current_tab_positions.contains(tab_position));
+            .retain(|tab_id, _| current_tab_ids.contains(tab_id));
     }
 
     pub(crate) fn reconcile_ai_pane_activity_panes(&mut self) {
         let pane_ids_by_tab = self
             .terminal_panes_by_tab
             .iter()
-            .map(|(tab_position, panes)| {
+            .map(|(tab_id, panes)| {
                 let pane_ids = panes
                     .iter()
                     .filter_map(|pane| pane_id_to_string(Some(pane.pane_id)))
                     .collect::<HashSet<_>>();
-                (*tab_position, pane_ids)
+                (*tab_id, pane_ids)
             })
             .collect::<std::collections::HashMap<_, _>>();
 
         self.ai_pane_activity_by_tab
-            .retain(|tab_position, activity_facts| {
-                let Some(tab_pane_ids) = pane_ids_by_tab.get(tab_position) else {
+            .retain(|tab_id, activity_facts| {
+                let Some(tab_pane_ids) = pane_ids_by_tab.get(tab_id) else {
                     return false;
                 };
                 activity_facts.retain(|fact| {
@@ -80,14 +80,14 @@ impl State {
             return;
         }
 
-        let Some(active_tab_position) = self.ensure_action_ready(pipe_message) else {
+        let Some(active_tab_id) = self.ensure_action_ready(pipe_message) else {
             return;
         };
-        let tab_position = if pane_id.is_empty() {
-            active_tab_position
+        let tab_id = if pane_id.is_empty() {
+            active_tab_id
         } else {
-            match self.find_tab_position_for_terminal_pane_id(&pane_id) {
-                Some(tab_position) => tab_position,
+            match self.find_tab_id_for_terminal_pane_id(&pane_id) {
+                Some(tab_id) => tab_id,
                 None => {
                     self.respond(pipe_message, RESULT_MISSING);
                     return;
@@ -95,11 +95,14 @@ impl State {
             }
         };
 
+        let tab_position = self
+            .tab_position_by_id
+            .get(&tab_id)
+            .copied()
+            .unwrap_or(tab_id);
         let fact = SessionAiPaneActivity::tab_local(tab_position, provider, pane_id, state);
         upsert_ai_pane_activity_fact(
-            self.ai_pane_activity_by_tab
-                .entry(tab_position)
-                .or_default(),
+            self.ai_pane_activity_by_tab.entry(tab_id).or_default(),
             fact,
         );
         self.respond(pipe_message, RESULT_OK);
@@ -107,15 +110,29 @@ impl State {
 
     pub(crate) fn get_active_ai_pane_activity_snapshot(
         &self,
-        active_tab_position: usize,
+        active_tab_id: usize,
     ) -> Vec<SessionAiPaneActivity> {
+        let active_tab_position = self
+            .tab_position_by_id
+            .get(&active_tab_id)
+            .copied()
+            .unwrap_or(active_tab_id);
         self.ai_pane_activity_by_tab
-            .get(&active_tab_position)
+            .get(&active_tab_id)
             .cloned()
+            .map(|activity_facts| {
+                activity_facts
+                    .into_iter()
+                    .map(|mut fact| {
+                        fact.tab_position = Some(active_tab_position);
+                        fact
+                    })
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
-    fn find_tab_position_for_terminal_pane_id(&self, pane_id: &str) -> Option<usize> {
+    fn find_tab_id_for_terminal_pane_id(&self, pane_id: &str) -> Option<usize> {
         self.terminal_panes_by_tab
             .iter()
             .find(|(_, panes)| {
@@ -124,6 +141,6 @@ impl State {
                     .filter_map(|pane| pane_id_to_string(Some(pane.pane_id)))
                     .any(|candidate| candidate == pane_id)
             })
-            .map(|(tab_position, _)| *tab_position)
+            .map(|(tab_id, _)| *tab_id)
     }
 }

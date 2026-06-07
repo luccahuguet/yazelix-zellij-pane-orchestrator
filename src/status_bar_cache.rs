@@ -32,13 +32,13 @@ impl State {
         if !self.permissions_granted {
             return;
         }
-        let Some(active_tab_position) = self.active_tab_position else {
+        let Some(active_tab_id) = self.active_tab_id else {
             return;
         };
-        self.publish_workspace_status_pipe(active_tab_position);
+        self.publish_workspace_status_pipe(active_tab_id);
 
         let Ok(payload) =
-            serde_json::to_string(&self.active_tab_session_state_snapshot(active_tab_position))
+            serde_json::to_string(&self.active_tab_session_state_snapshot(active_tab_id))
         else {
             return;
         };
@@ -64,15 +64,12 @@ impl State {
         self.status_bar_cache_last_payload = Some(payload);
     }
 
-    fn publish_workspace_status_pipe(&mut self, active_tab_position: usize) {
-        let Some(zjstatus_plugin_id) = self
-            .zjstatus_plugin_id_by_tab
-            .get(&active_tab_position)
-            .copied()
+    fn publish_workspace_status_pipe(&mut self, active_tab_id: usize) {
+        let Some(zjstatus_plugin_id) = self.zjstatus_plugin_id_by_tab.get(&active_tab_id).copied()
         else {
             return;
         };
-        let payload = self.workspace_status_pipe_payload(active_tab_position);
+        let payload = self.workspace_status_pipe_payload(active_tab_id);
         if self
             .workspace_status_pipe_payload_by_plugin
             .get(&zjstatus_plugin_id)
@@ -91,16 +88,16 @@ impl State {
             .insert(zjstatus_plugin_id, payload);
     }
 
-    fn workspace_status_pipe_payload(&self, active_tab_position: usize) -> String {
+    fn workspace_status_pipe_payload(&self, active_tab_id: usize) -> String {
         workspace_pipe_protocol_payload(
-            self.workspace_status_label(active_tab_position)
+            self.workspace_status_label(active_tab_id)
                 .unwrap_or_default()
                 .as_str(),
         )
     }
 
-    fn workspace_status_label(&self, active_tab_position: usize) -> Option<String> {
-        let workspace_state = self.workspace_state_by_tab.get(&active_tab_position)?;
+    fn workspace_status_label(&self, active_tab_id: usize) -> Option<String> {
+        let workspace_state = self.workspace_state_by_tab.get(&active_tab_id)?;
         if workspace_state.source != WorkspaceStateSource::Explicit {
             return None;
         }

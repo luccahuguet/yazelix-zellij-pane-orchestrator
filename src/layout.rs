@@ -25,16 +25,16 @@ impl State {
         pipe_message: &PipeMessage,
         direction: LayoutFamilyDirection,
     ) {
-        let Some(active_tab_position) = self.ensure_action_ready(pipe_message) else {
+        let Some(active_tab_id) = self.ensure_action_ready(pipe_message) else {
             return;
         };
 
-        if !self.can_switch_layout_family(active_tab_position) {
+        if !self.can_switch_layout_family(active_tab_id) {
             self.respond(pipe_message, RESULT_OK);
             return;
         }
 
-        let Some(layout_variant) = self.layout_variant_for_tab(active_tab_position) else {
+        let Some(layout_variant) = self.layout_variant_for_tab(active_tab_id) else {
             self.respond(pipe_message, RESULT_UNKNOWN_LAYOUT);
             return;
         };
@@ -45,39 +45,39 @@ impl State {
             return;
         }
 
-        self.run_to_layout_variant_for_tab(active_tab_position, layout_variant, target_variant);
+        self.run_to_layout_variant_for_tab(active_tab_id, layout_variant, target_variant);
         if target_variant.agent_state == AgentState::Open {
-            self.move_agent_right_after_layout_settle(active_tab_position);
+            self.move_agent_right_after_layout_settle(active_tab_id);
         }
 
         self.respond(pipe_message, RESULT_OK);
     }
 
     pub(crate) fn toggle_sidebar(&self, pipe_message: &PipeMessage) {
-        let Some(active_tab_position) = self.ensure_action_ready(pipe_message) else {
+        let Some(active_tab_id) = self.ensure_action_ready(pipe_message) else {
             return;
         };
 
-        if is_no_sidebar_mode(self.managed_panes_by_tab.get(&active_tab_position)) {
+        if is_no_sidebar_mode(self.managed_panes_by_tab.get(&active_tab_id)) {
             self.respond(pipe_message, RESULT_MISSING);
             return;
         }
 
-        let Some(sidebar_is_closed) = self.sidebar_is_closed(active_tab_position) else {
+        let Some(sidebar_is_closed) = self.sidebar_is_closed(active_tab_id) else {
             self.respond(pipe_message, RESULT_UNKNOWN_LAYOUT);
             return;
         };
 
         let focus_context = self
             .focus_context_by_tab
-            .get(&active_tab_position)
+            .get(&active_tab_id)
             .copied()
             .unwrap_or(crate::panes::FocusContext::Other);
-        let managed_tab_panes = self.managed_panes_by_tab.get(&active_tab_position);
+        let managed_tab_panes = self.managed_panes_by_tab.get(&active_tab_id);
         let has_editor = managed_tab_panes.and_then(|tab| tab.editor).is_some();
         let has_focus_fallback = self
             .fallback_terminal_pane_by_tab
-            .get(&active_tab_position)
+            .get(&active_tab_id)
             .is_some();
 
         let plan = resolve_sidebar_visibility_toggle(
@@ -93,15 +93,15 @@ impl State {
 
         match plan.action {
             SidebarVisibilityAction::Open
-                if self.active_layout_is_collapsed_base(active_tab_position) =>
+                if self.active_layout_is_collapsed_base(active_tab_id) =>
             {
                 self.run_next_swap_layout_steps(1)
             }
             SidebarVisibilityAction::Open => {
-                self.set_sidebar_state(active_tab_position, SidebarState::Open)
+                self.set_sidebar_state(active_tab_id, SidebarState::Open)
             }
             SidebarVisibilityAction::Close => {
-                self.set_sidebar_state(active_tab_position, SidebarState::Closed)
+                self.set_sidebar_state(active_tab_id, SidebarState::Closed)
             }
         }
         self.run_sidebar_post_layout_focus(plan.post_layout_focus);
@@ -110,30 +110,30 @@ impl State {
     }
 
     pub(crate) fn hide_sidebar(&self, pipe_message: &PipeMessage) {
-        let Some(active_tab_position) = self.ensure_action_ready(pipe_message) else {
+        let Some(active_tab_id) = self.ensure_action_ready(pipe_message) else {
             return;
         };
 
-        if is_no_sidebar_mode(self.managed_panes_by_tab.get(&active_tab_position)) {
+        if is_no_sidebar_mode(self.managed_panes_by_tab.get(&active_tab_id)) {
             self.respond(pipe_message, RESULT_MISSING);
             return;
         }
 
-        let Some(sidebar_is_closed) = self.sidebar_is_closed(active_tab_position) else {
+        let Some(sidebar_is_closed) = self.sidebar_is_closed(active_tab_id) else {
             self.respond(pipe_message, RESULT_UNKNOWN_LAYOUT);
             return;
         };
 
         let focus_context = self
             .focus_context_by_tab
-            .get(&active_tab_position)
+            .get(&active_tab_id)
             .copied()
             .unwrap_or(crate::panes::FocusContext::Other);
-        let managed_tab_panes = self.managed_panes_by_tab.get(&active_tab_position);
+        let managed_tab_panes = self.managed_panes_by_tab.get(&active_tab_id);
         let has_editor = managed_tab_panes.and_then(|tab| tab.editor).is_some();
         let has_focus_fallback = self
             .fallback_terminal_pane_by_tab
-            .get(&active_tab_position)
+            .get(&active_tab_id)
             .is_some();
 
         if let Some(post_layout_focus) = resolve_sidebar_hide(
@@ -146,20 +146,17 @@ impl State {
             has_editor,
             has_focus_fallback,
         ) {
-            self.set_sidebar_state(active_tab_position, SidebarState::Closed);
+            self.set_sidebar_state(active_tab_id, SidebarState::Closed);
             self.run_sidebar_post_layout_focus(post_layout_focus);
         }
 
         self.respond(pipe_message, RESULT_OK);
     }
 
-    pub(crate) fn get_active_layout_variant(
-        &self,
-        active_tab_position: usize,
-    ) -> Option<LayoutVariant> {
+    pub(crate) fn get_active_layout_variant(&self, active_tab_id: usize) -> Option<LayoutVariant> {
         let active_swap_layout_name = self
             .active_swap_layout_name_by_tab
-            .get(&active_tab_position)
+            .get(&active_tab_id)
             .cloned()
             .flatten();
 
@@ -168,47 +165,44 @@ impl State {
             .and_then(LayoutVariant::from_layout_name)
     }
 
-    pub(crate) fn layout_variant_for_tab(
-        &self,
-        active_tab_position: usize,
-    ) -> Option<LayoutVariant> {
-        self.get_active_layout_variant(active_tab_position)
-            .or_else(|| self.base_layout_variant(active_tab_position))
+    pub(crate) fn layout_variant_for_tab(&self, active_tab_id: usize) -> Option<LayoutVariant> {
+        self.get_active_layout_variant(active_tab_id)
+            .or_else(|| self.base_layout_variant(active_tab_id))
     }
 
-    pub(crate) fn sidebar_is_closed(&self, active_tab_position: usize) -> Option<bool> {
-        self.layout_variant_for_tab(active_tab_position)
+    pub(crate) fn sidebar_is_closed(&self, active_tab_id: usize) -> Option<bool> {
+        self.layout_variant_for_tab(active_tab_id)
             .map(|variant| variant.is_sidebar_closed())
     }
 
-    pub(crate) fn agent_is_closed(&self, active_tab_position: usize) -> Option<bool> {
-        self.layout_variant_for_tab(active_tab_position)
+    pub(crate) fn agent_is_closed(&self, active_tab_id: usize) -> Option<bool> {
+        self.layout_variant_for_tab(active_tab_id)
             .and_then(|variant| variant.agent_is_closed())
     }
 
-    fn base_layout_sidebar_is_closed(&self, active_tab_position: usize) -> Option<bool> {
-        if !self.active_layout_is_base(active_tab_position) {
+    fn base_layout_sidebar_is_closed(&self, active_tab_id: usize) -> Option<bool> {
+        if !self.active_layout_is_base(active_tab_id) {
             return None;
         }
         self.managed_panes_by_tab
-            .get(&active_tab_position)
+            .get(&active_tab_id)
             .and_then(|tab| tab.sidebar)
             .map(|sidebar| sidebar.pane_columns <= CLOSED_BASE_SIDEBAR_COLUMNS)
     }
 
-    fn base_layout_variant(&self, active_tab_position: usize) -> Option<LayoutVariant> {
-        if !self.active_layout_is_base(active_tab_position) {
+    fn base_layout_variant(&self, active_tab_id: usize) -> Option<LayoutVariant> {
+        if !self.active_layout_is_base(active_tab_id) {
             return None;
         }
 
-        let sidebar_state = if self.base_layout_sidebar_is_closed(active_tab_position)? {
+        let sidebar_state = if self.base_layout_sidebar_is_closed(active_tab_id)? {
             SidebarState::Closed
         } else {
             SidebarState::Open
         };
         let agent_state = self
             .managed_panes_by_tab
-            .get(&active_tab_position)
+            .get(&active_tab_id)
             .and_then(|tab| tab.agent)
             .map(|_| AgentState::Open)
             .unwrap_or(AgentState::Absent);
@@ -220,26 +214,26 @@ impl State {
         ))
     }
 
-    fn active_layout_is_base(&self, active_tab_position: usize) -> bool {
+    fn active_layout_is_base(&self, active_tab_id: usize) -> bool {
         self.active_swap_layout_name_by_tab
-            .get(&active_tab_position)
+            .get(&active_tab_id)
             .and_then(|layout| layout.as_deref())
             .is_some_and(|layout| layout == BASE_LAYOUT_NAME)
     }
 
-    fn active_layout_is_collapsed_base(&self, active_tab_position: usize) -> bool {
-        self.active_layout_is_base(active_tab_position)
-            && self.base_layout_sidebar_is_closed(active_tab_position) == Some(true)
+    fn active_layout_is_collapsed_base(&self, active_tab_id: usize) -> bool {
+        self.active_layout_is_base(active_tab_id)
+            && self.base_layout_sidebar_is_closed(active_tab_id) == Some(true)
     }
 
-    fn can_switch_layout_family(&self, active_tab_position: usize) -> bool {
+    fn can_switch_layout_family(&self, active_tab_id: usize) -> bool {
         let user_pane_count = self
             .user_pane_count_by_tab
-            .get(&active_tab_position)
+            .get(&active_tab_id)
             .copied()
             .unwrap_or(0);
 
-        let managed_tab_panes = self.managed_panes_by_tab.get(&active_tab_position);
+        let managed_tab_panes = self.managed_panes_by_tab.get(&active_tab_id);
         if is_no_sidebar_mode(managed_tab_panes) {
             user_pane_count >= 2
         } else if managed_tab_panes.and_then(|tab| tab.agent).is_some() {
@@ -275,11 +269,11 @@ impl State {
 
     fn run_to_layout_variant_for_tab(
         &self,
-        active_tab_position: usize,
+        active_tab_id: usize,
         current_variant: LayoutVariant,
         target_variant: LayoutVariant,
     ) {
-        if self.active_layout_is_base(active_tab_position) {
+        if self.active_layout_is_base(active_tab_id) {
             if let Some(plan) = swap_step_plan_from_base(target_variant) {
                 self.run_swap_step_plan(plan);
             }
@@ -291,29 +285,24 @@ impl State {
 
     pub(crate) fn set_agent_state(
         &self,
-        active_tab_position: usize,
+        active_tab_id: usize,
         agent_state: AgentState,
     ) -> Option<()> {
-        let current_variant = self.layout_variant_for_tab(active_tab_position)?;
+        let current_variant = self.layout_variant_for_tab(active_tab_id)?;
         let target_variant = current_variant.with_agent_state(agent_state);
-        self.run_to_layout_variant_for_tab(active_tab_position, current_variant, target_variant);
+        self.run_to_layout_variant_for_tab(active_tab_id, current_variant, target_variant);
         Some(())
     }
 
-    fn set_sidebar_state(&self, active_tab_position: usize, sidebar_state: SidebarState) {
-        if self.active_layout_is_base(active_tab_position) && sidebar_state == SidebarState::Closed
-        {
+    fn set_sidebar_state(&self, active_tab_id: usize, sidebar_state: SidebarState) {
+        if self.active_layout_is_base(active_tab_id) && sidebar_state == SidebarState::Closed {
             self.run_next_swap_layout_steps(sidebar_close_swap_steps(true));
             return;
         }
 
-        if let Some(current_variant) = self.layout_variant_for_tab(active_tab_position) {
+        if let Some(current_variant) = self.layout_variant_for_tab(active_tab_id) {
             let target_variant = current_variant.with_sidebar_state(sidebar_state);
-            self.run_to_layout_variant_for_tab(
-                active_tab_position,
-                current_variant,
-                target_variant,
-            );
+            self.run_to_layout_variant_for_tab(active_tab_id, current_variant, target_variant);
         }
     }
 
@@ -325,22 +314,19 @@ impl State {
     }
 
     pub(crate) fn open_sidebar_and_focus_after_layout_settle(&self) {
-        if let Some(active_tab_position) = self.active_tab_position {
-            self.open_sidebar_and_focus_after_layout_settle_for_tab(active_tab_position);
+        if let Some(active_tab_id) = self.active_tab_id {
+            self.open_sidebar_and_focus_after_layout_settle_for_tab(active_tab_id);
             return;
         }
         self.run_previous_swap_layout_steps(1);
         self.run_sidebar_post_layout_focus(SidebarPostLayoutFocus::MoveLeftToSidebar);
     }
 
-    pub(crate) fn open_sidebar_and_focus_after_layout_settle_for_tab(
-        &self,
-        active_tab_position: usize,
-    ) {
-        if self.active_layout_is_collapsed_base(active_tab_position) {
+    pub(crate) fn open_sidebar_and_focus_after_layout_settle_for_tab(&self, active_tab_id: usize) {
+        if self.active_layout_is_collapsed_base(active_tab_id) {
             self.run_next_swap_layout_steps(1);
         } else {
-            self.set_sidebar_state(active_tab_position, SidebarState::Open);
+            self.set_sidebar_state(active_tab_id, SidebarState::Open);
         }
         self.run_sidebar_post_layout_focus(SidebarPostLayoutFocus::MoveLeftToSidebar);
     }
