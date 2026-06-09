@@ -39,7 +39,7 @@
           wasmPath = "share/yazelix_zellij_pane_orchestrator/yazelix_pane_orchestrator.wasm";
           wasmTarget = "wasm32-wasip1";
           cargoBuildHookDisabled = true;
-          wasmToolchainPreservedAcrossPreBuild = true;
+          preBuildPreservesNixRustToolchain = true;
           cargoBuildSerialized = true;
           installCheckVerifiesWasm = true;
         };
@@ -52,12 +52,13 @@
           doCheck = false;
 
           buildPhase = ''
-            export CARGO="${rustToolchain}/bin/cargo"
-            export RUSTC="${rustToolchain}/bin/rustc"
-            export PATH="${rustToolchain}/bin:$PATH"
-            yazelix_saved_cargo="$CARGO"
-            yazelix_saved_rustc="$RUSTC"
+            yazelix_saved_cargo="''${CARGO:-$(command -v cargo || true)}"
+            yazelix_saved_rustc="''${RUSTC:-$(command -v rustc || true)}"
             yazelix_saved_path="$PATH"
+            if [ -z "$yazelix_saved_cargo" ] || [ -z "$yazelix_saved_rustc" ]; then
+              echo "Nix Rust hooks did not provide cargo/rustc before preBuild" >&2
+              exit 1
+            fi
 
             runHook preBuild
 
