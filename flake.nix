@@ -39,11 +39,8 @@
           wasmPath = "share/yazelix_zellij_pane_orchestrator/yazelix_pane_orchestrator.wasm";
           wasmTarget = "wasm32-wasip1";
           cargoBuildHookDisabled = true;
-          explicitCargoFromWasmToolchain = true;
-          explicitRustcFromWasmToolchain = true;
-          toolchainPrependedToPath = true;
-          wasmTargetLibdirCheckedBeforePreBuild = true;
-          cargoBuildRunsAfterPreBuild = true;
+          wasmToolchainPinnedAfterPreBuild = true;
+          cargoBuildSerialized = true;
           installCheckVerifiesWasm = true;
         };
         yazelixZellijPaneOrchestrator = rustPlatform.buildRustPackage {
@@ -55,9 +52,12 @@
           doCheck = false;
 
           buildPhase = ''
+            runHook preBuild
+
             export CARGO="${rustToolchain}/bin/cargo"
             export RUSTC="${rustToolchain}/bin/rustc"
             export PATH="${rustToolchain}/bin:$PATH"
+            export CARGO_BUILD_RUSTC="$RUSTC"
 
             wasm_target_libdir="$("$RUSTC" --print target-libdir --target ${zellijPluginWasmPackageContract.wasmTarget})"
             if [ ! -d "$wasm_target_libdir" ]; then
@@ -65,9 +65,8 @@
               exit 1
             fi
 
-            runHook preBuild
-
             "$CARGO" build \
+              -j 1 \
               --target-dir target \
               --offline \
               --profile release \
