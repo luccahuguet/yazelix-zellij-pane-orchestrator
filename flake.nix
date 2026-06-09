@@ -40,6 +40,7 @@
           wasmTarget = "wasm32-wasip1";
           cargoBuildHookDisabled = true;
           preBuildPreservesNixRustToolchain = true;
+          wasmTargetRustcEnvPinned = true;
           cargoBuildSerialized = true;
           installCheckVerifiesWasm = true;
         };
@@ -66,6 +67,7 @@
             export RUSTC="$yazelix_saved_rustc"
             export PATH="$yazelix_saved_path"
             export CARGO_BUILD_RUSTC="$RUSTC"
+            export CARGO_TARGET_WASM32_WASIP1_RUSTC="$RUSTC"
 
             wasm_target_libdir="$("$RUSTC" --print target-libdir --target ${zellijPluginWasmPackageContract.wasmTarget})"
             if [ ! -d "$wasm_target_libdir" ]; then
