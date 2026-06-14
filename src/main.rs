@@ -53,9 +53,13 @@ struct State {
     last_known_layout_variant_by_tab: RefCell<HashMap<usize, LayoutVariant>>,
     tab_pane_caches: panes::TabPaneCaches,
     last_pane_manifest: Option<PaneManifest>,
+    tab_name_by_tab_id: HashMap<usize, String>,
     workspace_state_by_tab: HashMap<usize, WorkspaceState>,
     sidebar_yazi_state_by_tab: HashMap<usize, sidebar_yazi::SidebarYaziState>,
     ai_pane_activity_by_tab: HashMap<usize, Vec<SessionAiPaneActivity>>,
+    ai_activity_tab_base_name_by_tab: HashMap<usize, String>,
+    ai_activity_tab_decoration_last_write: Option<Instant>,
+    ai_activity_tab_decoration_next_flush: Option<Instant>,
     seen_tab_ids: HashSet<usize>,
     initial_workspace_state: Option<WorkspaceState>,
     runtime_dir: PathBuf,
@@ -137,6 +141,10 @@ impl ZellijPlugin for State {
         match event {
             Event::TabUpdate(tabs) => {
                 self.tab_identity = TabIdentityState::from_tabs(&tabs);
+                self.tab_name_by_tab_id = tabs
+                    .iter()
+                    .map(|tab| (tab.tab_id, tab.name.clone()))
+                    .collect();
                 self.reconcile_workspace_state(&tabs);
                 self.reconcile_ai_pane_activity_tabs(&tabs);
                 {
@@ -167,11 +175,15 @@ impl ZellijPlugin for State {
             }
             Event::PermissionRequestResult(status) => {
                 self.permissions_granted = status == PermissionStatus::Granted;
+                if self.permissions_granted {
+                    self.sync_ai_activity_tab_decorations_for_known_tabs();
+                }
             }
             Event::InputReceived => self.record_screen_saver_input(),
             Event::Timer(_) => {
                 self.timer_armed_for = None;
                 self.record_orchestrator_timer();
+                self.handle_ai_activity_tab_decoration_timer();
                 self.handle_screen_saver_timer();
                 self.handle_status_bar_claude_usage_timer();
                 self.handle_status_bar_codex_usage_timer();
@@ -325,6 +337,8 @@ impl State {
             .retain(|tab_id, _| current_tab_ids.contains(tab_id));
         self.tab_pane_caches.retain_current_tabs(&current_tab_ids);
         retain_current_tab_state(&mut self.sidebar_yazi_state_by_tab, &current_tab_ids);
+        retain_current_tab_state(&mut self.tab_name_by_tab_id, &current_tab_ids);
+        retain_current_tab_state(&mut self.ai_activity_tab_base_name_by_tab, &current_tab_ids);
     }
 
     pub(crate) fn ensure_action_ready(&self, pipe_message: &PipeMessage) -> Option<usize> {
@@ -358,6 +372,7 @@ impl State {
                 self.status_bar_claude_usage_next_refresh,
                 self.status_bar_codex_usage_next_refresh,
                 self.status_bar_opencode_go_usage_next_refresh,
+                self.ai_activity_tab_decoration_next_flush,
                 self.orchestrator_heartbeat.next_flush,
             ],
             self.timer_armed_for,

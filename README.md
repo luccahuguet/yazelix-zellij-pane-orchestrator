@@ -69,6 +69,19 @@ Yazelix integration commands depend on Yazelix-managed editor/sidebar/workspace 
 - `retarget_workspace`
 - `reload_runtime_config`
 
+`register_ai_pane_activity` records tab-local AI activity facts. When a fact is
+`stale`, the plugin prefixes that tab's Zellij name with `[!] `. When any fact
+is `active` or `thinking`, or when a live spinner-prefixed terminal title such
+as Codex's activity title is present, the plugin prefixes the tab name with
+`[...] `. Alert takes priority over busy, and busy takes priority over no
+marker. Spinner-prefixed terminal titles are remembered by producing pane: when
+the title stops indicating activity while that pane is not focused, the tab
+switches to `[!] ` and stays there until the user focuses that producing pane.
+This uses native Zellij tab names so status bars that render tab names can show
+the activity state without a second widget API. Native tab-name writes are
+coalesced and rate-limited so terminal-title animation cannot produce a rename
+for every spinner frame.
+
 Editor command-mode integration is Neovim-only. Helix buffer opens and cwd sync are owned by the Yazelix Helix action bridge; direct Helix `open_file`, `set_managed_editor_cwd`, or `retarget_workspace` editor requests are rejected instead of sending `:open` or `:cd` text into the terminal.
 
 Debug commands are maintainer-only and not part of the ordinary standalone API:

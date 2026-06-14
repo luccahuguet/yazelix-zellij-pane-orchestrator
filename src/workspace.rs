@@ -292,7 +292,7 @@ pub(crate) fn tab_name_from_workspace_root(workspace_root: &str) -> String {
         .to_string()
 }
 
-fn tab_index_from_position(tab_position: usize) -> u32 {
+pub(crate) fn tab_index_from_position(tab_position: usize) -> u32 {
     // Zellij reports tabs to plugins by 0-based position, but rename_tab targets the 1-based tab index.
     u32::try_from(tab_position + 1).expect("tab position should fit in u32")
 }

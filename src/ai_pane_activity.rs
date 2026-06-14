@@ -1,20 +1,36 @@
 use std::collections::HashSet;
+use std::time::Instant;
 
 use yazelix_zellij_pane_orchestrator::active_tab_session_state::SessionAiPaneActivity;
 use yazelix_zellij_pane_orchestrator::active_tab_session_state::SessionAiPaneActivityState;
 use yazelix_zellij_pane_orchestrator::ai_pane_activity_contract::{
-    normalized_ai_activity_state, upsert_ai_pane_activity_fact, AiPaneActivityRegistration,
+    ai_activity_tab_decoration_state, ai_activity_tab_decoration_write_deadline,
+    normalized_ai_activity_state, plan_ai_activity_tab_name, remove_ai_pane_activity_fact,
+    terminal_title_activity_state, upsert_ai_pane_activity_fact, AiActivityTabNamePlan,
+    AiPaneActivityRegistration, TERMINAL_TITLE_ACTIVITY_PROVIDER,
 };
 use zellij_tile::prelude::*;
 
 use crate::panes::pane_id_to_string;
+use crate::workspace::tab_index_from_position;
 use crate::{State, RESULT_DENIED, RESULT_INVALID_PAYLOAD, RESULT_MISSING, RESULT_OK};
+
+struct AiActivityTabDecorationPlan {
+    tab_id: usize,
+    tab_position: usize,
+    current_name: String,
+    name_plan: AiActivityTabNamePlan,
+}
 
 impl State {
     pub(crate) fn reconcile_ai_pane_activity_tabs(&mut self, tabs: &[TabInfo]) {
         let current_tab_ids = tabs.iter().map(|tab| tab.tab_id).collect::<HashSet<_>>();
         self.ai_pane_activity_by_tab
             .retain(|tab_id, _| current_tab_ids.contains(tab_id));
+        self.ai_activity_tab_base_name_by_tab
+            .retain(|tab_id, _| current_tab_ids.contains(tab_id));
+        self.reconcile_terminal_title_ai_activity();
+        self.sync_ai_activity_tab_decorations_for_tabs(tabs);
     }
 
     pub(crate) fn reconcile_ai_pane_activity_panes(&mut self) {
@@ -41,6 +57,8 @@ impl State {
                 });
                 true
             });
+        self.reconcile_terminal_title_ai_activity();
+        self.sync_ai_activity_tab_decorations_for_known_tabs();
     }
 
     pub(crate) fn register_ai_pane_activity(&mut self, pipe_message: &PipeMessage) {
@@ -105,6 +123,7 @@ impl State {
             self.ai_pane_activity_by_tab.entry(tab_id).or_default(),
             fact,
         );
+        self.sync_ai_activity_tab_decoration_for_tab(tab_id);
         self.respond(pipe_message, RESULT_OK);
     }
 
@@ -131,6 +150,54 @@ impl State {
             .unwrap_or_default()
     }
 
+    fn reconcile_terminal_title_ai_activity(&mut self) {
+        let observations = self
+            .tab_pane_caches
+            .terminal_panes_by_tab
+            .iter()
+            .flat_map(|(tab_id, panes)| {
+                panes.iter().filter_map(move |pane| {
+                    let pane_id = pane_id_to_string(Some(pane.pane_id))?;
+                    Some((*tab_id, pane_id, pane.title.clone(), pane.is_focused))
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for (tab_id, pane_id, title, is_focused) in observations {
+            let previous = self.ai_pane_activity_by_tab.get(&tab_id).and_then(|facts| {
+                facts
+                    .iter()
+                    .find(|fact| {
+                        fact.provider == TERMINAL_TITLE_ACTIVITY_PROVIDER && fact.pane_id == pane_id
+                    })
+                    .map(|fact| fact.state)
+            });
+            let Some(state) = terminal_title_activity_state(previous, &title, is_focused) else {
+                if let Some(facts) = self.ai_pane_activity_by_tab.get_mut(&tab_id) {
+                    remove_ai_pane_activity_fact(facts, TERMINAL_TITLE_ACTIVITY_PROVIDER, &pane_id);
+                }
+                continue;
+            };
+
+            let tab_position = self
+                .tab_identity
+                .position_for_tab_id(tab_id)
+                .unwrap_or(tab_id);
+            upsert_ai_pane_activity_fact(
+                self.ai_pane_activity_by_tab.entry(tab_id).or_default(),
+                SessionAiPaneActivity::tab_local(
+                    tab_position,
+                    TERMINAL_TITLE_ACTIVITY_PROVIDER.to_string(),
+                    pane_id,
+                    state,
+                ),
+            );
+        }
+
+        self.ai_pane_activity_by_tab
+            .retain(|_, facts| !facts.is_empty());
+    }
+
     fn find_tab_id_for_terminal_pane_id(&self, pane_id: &str) -> Option<usize> {
         self.tab_pane_caches
             .terminal_panes_by_tab
@@ -142,5 +209,142 @@ impl State {
                     .any(|candidate| candidate == pane_id)
             })
             .map(|(tab_id, _)| *tab_id)
+    }
+
+    pub(crate) fn sync_ai_activity_tab_decorations_for_tabs(&mut self, tabs: &[TabInfo]) {
+        let tab_entries = tabs
+            .iter()
+            .map(|tab| (tab.tab_id, tab.position, tab.name.clone()))
+            .collect::<Vec<_>>();
+        self.sync_ai_activity_tab_decoration_entries(tab_entries);
+    }
+
+    pub(crate) fn sync_ai_activity_tab_decorations_for_known_tabs(&mut self) {
+        let tab_entries = self
+            .tab_name_by_tab_id
+            .iter()
+            .filter_map(|(tab_id, name)| {
+                self.tab_identity
+                    .position_for_tab_id(*tab_id)
+                    .map(|position| (*tab_id, position, name.clone()))
+            })
+            .collect::<Vec<_>>();
+        self.sync_ai_activity_tab_decoration_entries(tab_entries);
+    }
+
+    fn sync_ai_activity_tab_decoration_for_tab(&mut self, tab_id: usize) {
+        let Some(tab_position) = self.tab_identity.position_for_tab_id(tab_id) else {
+            return;
+        };
+        let Some(current_name) = self.tab_name_by_tab_id.get(&tab_id).cloned() else {
+            return;
+        };
+        self.sync_ai_activity_tab_decoration_entries(vec![(tab_id, tab_position, current_name)]);
+    }
+
+    fn sync_ai_activity_tab_decoration_entries(
+        &mut self,
+        tab_entries: Vec<(usize, usize, String)>,
+    ) {
+        if !self.permissions_granted {
+            return;
+        }
+
+        let plans = tab_entries
+            .into_iter()
+            .map(|(tab_id, tab_position, current_name)| {
+                self.ai_activity_tab_decoration_plan(tab_id, tab_position, current_name)
+            })
+            .collect::<Vec<_>>();
+
+        let needs_native_rename = plans
+            .iter()
+            .any(|plan| plan.name_plan.display_name != plan.current_name);
+        if !needs_native_rename {
+            self.apply_ai_activity_tab_decoration_plans(plans);
+            return;
+        }
+
+        let now = Instant::now();
+        if let Some(deadline) = ai_activity_tab_decoration_write_deadline(
+            now,
+            self.ai_activity_tab_decoration_last_write,
+        ) {
+            self.schedule_ai_activity_tab_decoration_flush(deadline);
+            return;
+        }
+
+        self.ai_activity_tab_decoration_next_flush = None;
+        self.apply_ai_activity_tab_decoration_plans(plans);
+        self.ai_activity_tab_decoration_last_write = Some(now);
+    }
+
+    fn ai_activity_tab_decoration_plan(
+        &self,
+        tab_id: usize,
+        tab_position: usize,
+        current_name: String,
+    ) -> AiActivityTabDecorationPlan {
+        let facts = self
+            .ai_pane_activity_by_tab
+            .get(&tab_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let state = ai_activity_tab_decoration_state(facts);
+        let previous_base_name = self
+            .ai_activity_tab_base_name_by_tab
+            .get(&tab_id)
+            .map(String::as_str);
+        let name_plan = plan_ai_activity_tab_name(&current_name, previous_base_name, state);
+
+        AiActivityTabDecorationPlan {
+            tab_id,
+            tab_position,
+            current_name,
+            name_plan,
+        }
+    }
+
+    fn apply_ai_activity_tab_decoration_plans(&mut self, plans: Vec<AiActivityTabDecorationPlan>) {
+        for plan in plans {
+            if plan.name_plan.display_name != plan.current_name {
+                rename_tab(
+                    tab_index_from_position(plan.tab_position),
+                    &plan.name_plan.display_name,
+                );
+            }
+
+            if let Some(base_name) = plan.name_plan.base_name {
+                self.ai_activity_tab_base_name_by_tab
+                    .insert(plan.tab_id, base_name);
+            } else {
+                self.ai_activity_tab_base_name_by_tab.remove(&plan.tab_id);
+            }
+            self.tab_name_by_tab_id
+                .insert(plan.tab_id, plan.name_plan.display_name);
+        }
+    }
+
+    fn schedule_ai_activity_tab_decoration_flush(&mut self, deadline: Instant) {
+        if self
+            .ai_activity_tab_decoration_next_flush
+            .map(|existing| deadline < existing)
+            .unwrap_or(true)
+        {
+            self.ai_activity_tab_decoration_next_flush = Some(deadline);
+            self.arm_next_timer();
+        }
+    }
+
+    pub(crate) fn handle_ai_activity_tab_decoration_timer(&mut self) {
+        let Some(deadline) = self.ai_activity_tab_decoration_next_flush else {
+            return;
+        };
+        if Instant::now() < deadline {
+            return;
+        }
+
+        self.ai_activity_tab_decoration_next_flush = None;
+        self.sync_ai_activity_tab_decorations_for_known_tabs();
     }
 }
