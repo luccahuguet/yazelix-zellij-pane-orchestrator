@@ -9,6 +9,9 @@ use yazelix_zellij_pane_orchestrator::ai_pane_activity_contract::{
     terminal_title_activity_state, upsert_ai_pane_activity_fact, AiActivityTabNamePlan,
     AiPaneActivityRegistration, TERMINAL_TITLE_ACTIVITY_PROVIDER,
 };
+use yazelix_zellij_pane_orchestrator::tab_activity_snapshot_contract::{
+    build_all_tab_activity_snapshot_v1, AllTabActivitySnapshotV1, TabActivityReadState,
+};
 use zellij_tile::prelude::*;
 
 use crate::panes::pane_id_to_string;
@@ -148,6 +151,45 @@ impl State {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    pub(crate) fn get_all_tab_activity_state(&self, pipe_message: &PipeMessage) {
+        let Some(_) = self.ensure_action_ready(pipe_message) else {
+            return;
+        };
+        let Some(snapshot) = self.all_tab_activity_snapshot() else {
+            self.respond(pipe_message, RESULT_MISSING);
+            return;
+        };
+
+        match serde_json::to_string(&snapshot) {
+            Ok(serialized) => self.respond(pipe_message, &serialized),
+            Err(_) => self.respond(pipe_message, RESULT_INVALID_PAYLOAD),
+        }
+    }
+
+    pub(crate) fn all_tab_activity_snapshot(&self) -> Option<AllTabActivitySnapshotV1> {
+        let tabs = self
+            .tab_identity
+            .tab_id_by_position()
+            .iter()
+            .map(|(tab_position, tab_id)| {
+                let current_name = self.tab_name_by_tab_id.get(tab_id)?.clone();
+                Some(TabActivityReadState {
+                    tab_id: *tab_id,
+                    tab_position: *tab_position,
+                    current_name,
+                    base_name: self.ai_activity_tab_base_name_by_tab.get(tab_id).cloned(),
+                    activity: self
+                        .ai_pane_activity_by_tab
+                        .get(tab_id)
+                        .cloned()
+                        .unwrap_or_default(),
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+
+        Some(build_all_tab_activity_snapshot_v1(tabs))
     }
 
     fn reconcile_terminal_title_ai_activity(&mut self) {

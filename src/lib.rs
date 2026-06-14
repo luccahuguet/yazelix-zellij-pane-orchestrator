@@ -13,6 +13,7 @@ pub mod sidebar_contract;
 pub mod sidebar_state_contract;
 pub mod status_bar_cache_contract;
 pub mod status_bar_workspace_pipe_contract;
+pub mod tab_activity_snapshot_contract;
 pub mod tab_identity_contract;
 pub mod timer_schedule_contract;
 pub mod transient_pane_contract;

@@ -272,6 +272,10 @@ impl ZellijPlugin for State {
                 self.get_active_tab_session_state(&pipe_message);
                 false
             }
+            "get_all_tab_activity_state" => {
+                self.get_all_tab_activity_state(&pipe_message);
+                false
+            }
             "retarget_workspace" => {
                 self.retarget_workspace(&pipe_message);
                 false
