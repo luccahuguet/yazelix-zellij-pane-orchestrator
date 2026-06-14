@@ -7,7 +7,8 @@ use yazelix_zellij_pane_orchestrator::ai_pane_activity_contract::{
     ai_activity_tab_decoration_state, ai_activity_tab_decoration_write_deadline,
     normalized_ai_activity_state, plan_ai_activity_tab_name, remove_ai_pane_activity_fact,
     terminal_title_activity_state, upsert_ai_pane_activity_fact, AiActivityTabNamePlan,
-    AiPaneActivityRegistration, TERMINAL_TITLE_ACTIVITY_PROVIDER,
+    AiPaneActivityRegistration, AI_ACTIVITY_TAB_DECORATION_MIN_WRITE_INTERVAL,
+    TERMINAL_TITLE_ACTIVITY_PROVIDER,
 };
 use yazelix_zellij_pane_orchestrator::tab_activity_snapshot_contract::{
     build_all_tab_activity_snapshot_v1, AllTabActivitySnapshotV1, TabActivityReadState,
@@ -15,12 +16,10 @@ use yazelix_zellij_pane_orchestrator::tab_activity_snapshot_contract::{
 use zellij_tile::prelude::*;
 
 use crate::panes::pane_id_to_string;
-use crate::workspace::tab_index_from_position;
 use crate::{State, RESULT_DENIED, RESULT_INVALID_PAYLOAD, RESULT_MISSING, RESULT_OK};
 
 struct AiActivityTabDecorationPlan {
     tab_id: usize,
-    tab_position: usize,
     current_name: String,
     name_plan: AiActivityTabNamePlan,
 }
@@ -274,7 +273,7 @@ impl State {
     pub(crate) fn sync_ai_activity_tab_decorations_for_tabs(&mut self, tabs: &[TabInfo]) {
         let tab_entries = tabs
             .iter()
-            .map(|tab| (tab.tab_id, tab.position, tab.name.clone()))
+            .map(|tab| (tab.tab_id, tab.name.clone()))
             .collect::<Vec<_>>();
         self.sync_ai_activity_tab_decoration_entries(tab_entries);
     }
@@ -286,34 +285,31 @@ impl State {
             .filter_map(|(tab_id, name)| {
                 self.tab_identity
                     .position_for_tab_id(*tab_id)
-                    .map(|position| (*tab_id, position, name.clone()))
+                    .map(|_| (*tab_id, name.clone()))
             })
             .collect::<Vec<_>>();
         self.sync_ai_activity_tab_decoration_entries(tab_entries);
     }
 
     fn sync_ai_activity_tab_decoration_for_tab(&mut self, tab_id: usize) {
-        let Some(tab_position) = self.tab_identity.position_for_tab_id(tab_id) else {
+        if self.tab_identity.position_for_tab_id(tab_id).is_none() {
             return;
-        };
+        }
         let Some(current_name) = self.tab_name_by_tab_id.get(&tab_id).cloned() else {
             return;
         };
-        self.sync_ai_activity_tab_decoration_entries(vec![(tab_id, tab_position, current_name)]);
+        self.sync_ai_activity_tab_decoration_entries(vec![(tab_id, current_name)]);
     }
 
-    fn sync_ai_activity_tab_decoration_entries(
-        &mut self,
-        tab_entries: Vec<(usize, usize, String)>,
-    ) {
+    fn sync_ai_activity_tab_decoration_entries(&mut self, tab_entries: Vec<(usize, String)>) {
         if !self.permissions_granted {
             return;
         }
 
         let plans = tab_entries
             .into_iter()
-            .map(|(tab_id, tab_position, current_name)| {
-                self.ai_activity_tab_decoration_plan(tab_id, tab_position, current_name)
+            .map(|(tab_id, current_name)| {
+                self.ai_activity_tab_decoration_plan(tab_id, current_name)
             })
             .collect::<Vec<_>>();
 
@@ -335,14 +331,18 @@ impl State {
         }
 
         self.ai_activity_tab_decoration_next_flush = None;
-        self.apply_ai_activity_tab_decoration_plans(plans);
+        let issued_native_rename = self.apply_ai_activity_tab_decoration_plans(plans);
         self.ai_activity_tab_decoration_last_write = Some(now);
+        if issued_native_rename {
+            self.schedule_ai_activity_tab_decoration_flush(
+                now + AI_ACTIVITY_TAB_DECORATION_MIN_WRITE_INTERVAL,
+            );
+        }
     }
 
     fn ai_activity_tab_decoration_plan(
         &self,
         tab_id: usize,
-        tab_position: usize,
         current_name: String,
     ) -> AiActivityTabDecorationPlan {
         let facts = self
@@ -359,30 +359,34 @@ impl State {
 
         AiActivityTabDecorationPlan {
             tab_id,
-            tab_position,
             current_name,
             name_plan,
         }
     }
 
-    fn apply_ai_activity_tab_decoration_plans(&mut self, plans: Vec<AiActivityTabDecorationPlan>) {
+    fn apply_ai_activity_tab_decoration_plans(
+        &mut self,
+        plans: Vec<AiActivityTabDecorationPlan>,
+    ) -> bool {
+        let mut issued_native_rename = false;
         for plan in plans {
             if plan.name_plan.display_name != plan.current_name {
-                rename_tab(
-                    tab_index_from_position(plan.tab_position),
-                    &plan.name_plan.display_name,
-                );
+                rename_tab_with_id(plan.tab_id as u64, &plan.name_plan.display_name);
+                issued_native_rename = true;
             }
 
             if let Some(base_name) = plan.name_plan.base_name {
                 self.ai_activity_tab_base_name_by_tab
                     .insert(plan.tab_id, base_name);
-            } else {
+            } else if plan.name_plan.display_name == plan.current_name {
                 self.ai_activity_tab_base_name_by_tab.remove(&plan.tab_id);
             }
-            self.tab_name_by_tab_id
-                .insert(plan.tab_id, plan.name_plan.display_name);
+            if plan.name_plan.display_name == plan.current_name {
+                self.tab_name_by_tab_id
+                    .insert(plan.tab_id, plan.name_plan.display_name);
+            }
         }
+        issued_native_rename
     }
 
     fn schedule_ai_activity_tab_decoration_flush(&mut self, deadline: Instant) {
