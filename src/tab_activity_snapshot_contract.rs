@@ -40,7 +40,14 @@ pub struct TabActivitySnapshotTab {
     pub tab_id: usize,
     pub tab_position: usize,
     pub base_name: String,
+    pub active: bool,
     pub activity_state: TabActivitySnapshotState,
+    #[serde(default)]
+    pub is_fullscreen_active: bool,
+    #[serde(default)]
+    pub is_sync_panes_active: bool,
+    #[serde(default)]
+    pub has_floating_panes: bool,
     #[serde(default)]
     pub activity: Vec<SessionAiPaneActivity>,
 }
@@ -57,6 +64,10 @@ pub struct TabActivityReadState {
     pub tab_position: usize,
     pub current_name: String,
     pub base_name: Option<String>,
+    pub active: bool,
+    pub is_fullscreen_active: bool,
+    pub is_sync_panes_active: bool,
+    pub has_floating_panes: bool,
     pub activity: Vec<SessionAiPaneActivity>,
 }
 
@@ -86,7 +97,11 @@ pub fn build_all_tab_activity_snapshot_v1(
                     tab_id: tab.tab_id,
                     tab_position: tab.tab_position,
                     base_name: tab.base_name.unwrap_or(tab.current_name),
+                    active: tab.active,
                     activity_state,
+                    is_fullscreen_active: tab.is_fullscreen_active,
+                    is_sync_panes_active: tab.is_sync_panes_active,
+                    has_floating_panes: tab.has_floating_panes,
                     activity,
                 }
             })
@@ -110,6 +125,10 @@ mod tests {
                 tab_position: 2,
                 current_name: "[...] agent".to_string(),
                 base_name: Some("agent".to_string()),
+                active: false,
+                is_fullscreen_active: false,
+                is_sync_panes_active: true,
+                has_floating_panes: true,
                 activity: vec![
                     SessionAiPaneActivity::tab_local(
                         99,
@@ -130,6 +149,10 @@ mod tests {
                 tab_position: 0,
                 current_name: "editor".to_string(),
                 base_name: None,
+                active: true,
+                is_fullscreen_active: false,
+                is_sync_panes_active: false,
+                has_floating_panes: false,
                 activity: vec![],
             },
         ]);
@@ -155,6 +178,10 @@ mod tests {
             snapshot.tabs[1].activity_state,
             TabActivitySnapshotState::Alert
         );
+        assert!(snapshot.tabs[0].active);
+        assert!(!snapshot.tabs[1].active);
+        assert!(snapshot.tabs[1].is_sync_panes_active);
+        assert!(snapshot.tabs[1].has_floating_panes);
         assert_eq!(snapshot.tabs[1].activity[0].tab_position, Some(2));
         assert_eq!(snapshot.tabs[1].activity[1].tab_position, Some(2));
     }
@@ -167,6 +194,10 @@ mod tests {
             tab_position: 1,
             current_name: "agent".to_string(),
             base_name: None,
+            active: true,
+            is_fullscreen_active: true,
+            is_sync_panes_active: false,
+            has_floating_panes: false,
             activity: vec![SessionAiPaneActivity::tab_local(
                 1,
                 "terminal-title".to_string(),
@@ -189,7 +220,11 @@ mod tests {
                         "tab_id": 42,
                         "tab_position": 1,
                         "base_name": "agent",
+                        "active": true,
                         "activity_state": "busy",
+                        "is_fullscreen_active": true,
+                        "is_sync_panes_active": false,
+                        "has_floating_panes": false,
                         "activity": [
                             {
                                 "tab_position": 1,

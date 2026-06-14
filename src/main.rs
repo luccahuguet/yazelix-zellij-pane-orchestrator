@@ -54,6 +54,8 @@ struct State {
     tab_pane_caches: panes::TabPaneCaches,
     last_pane_manifest: Option<PaneManifest>,
     tab_name_by_tab_id: HashMap<usize, String>,
+    tab_fullscreen_active_by_tab: HashMap<usize, bool>,
+    tab_sync_panes_active_by_tab: HashMap<usize, bool>,
     workspace_state_by_tab: HashMap<usize, WorkspaceState>,
     sidebar_yazi_state_by_tab: HashMap<usize, sidebar_yazi::SidebarYaziState>,
     ai_pane_activity_by_tab: HashMap<usize, Vec<SessionAiPaneActivity>>,
@@ -144,6 +146,14 @@ impl ZellijPlugin for State {
                 self.tab_name_by_tab_id = tabs
                     .iter()
                     .map(|tab| (tab.tab_id, tab.name.clone()))
+                    .collect();
+                self.tab_fullscreen_active_by_tab = tabs
+                    .iter()
+                    .map(|tab| (tab.tab_id, tab.is_fullscreen_active))
+                    .collect();
+                self.tab_sync_panes_active_by_tab = tabs
+                    .iter()
+                    .map(|tab| (tab.tab_id, tab.is_sync_panes_active))
                     .collect();
                 self.reconcile_workspace_state(&tabs);
                 self.reconcile_ai_pane_activity_tabs(&tabs);
@@ -342,6 +352,8 @@ impl State {
         self.tab_pane_caches.retain_current_tabs(&current_tab_ids);
         retain_current_tab_state(&mut self.sidebar_yazi_state_by_tab, &current_tab_ids);
         retain_current_tab_state(&mut self.tab_name_by_tab_id, &current_tab_ids);
+        retain_current_tab_state(&mut self.tab_fullscreen_active_by_tab, &current_tab_ids);
+        retain_current_tab_state(&mut self.tab_sync_panes_active_by_tab, &current_tab_ids);
         retain_current_tab_state(&mut self.ai_activity_tab_base_name_by_tab, &current_tab_ids);
     }
 

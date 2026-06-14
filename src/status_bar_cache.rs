@@ -37,12 +37,19 @@ impl State {
         };
         self.publish_workspace_status_pipe(active_tab_id);
 
-        let Ok(payload) =
+        let Ok(status_payload) =
             serde_json::to_string(&self.active_tab_session_state_snapshot(active_tab_id))
         else {
             return;
         };
-        if self.status_bar_cache_last_payload.as_deref() == Some(payload.as_str()) {
+        let Some(tab_activity_snapshot) = self.all_tab_activity_snapshot() else {
+            return;
+        };
+        let Ok(tab_activity_payload) = serde_json::to_string(&tab_activity_snapshot) else {
+            return;
+        };
+        let cache_key = format!("{status_payload}\n{tab_activity_payload}");
+        if self.status_bar_cache_last_payload.as_deref() == Some(cache_key.as_str()) {
             return;
         }
 
@@ -57,11 +64,13 @@ impl State {
             "--path",
             runtime.cache_path.as_str(),
             "--payload",
-            payload.as_str(),
+            status_payload.as_str(),
+            "--tab-activity-payload",
+            tab_activity_payload.as_str(),
         ];
         self.record_status_cache_write();
         run_command_with_env_variables_and_cwd(&command, runtime.env, runtime.cwd, BTreeMap::new());
-        self.status_bar_cache_last_payload = Some(payload);
+        self.status_bar_cache_last_payload = Some(cache_key);
     }
 
     fn publish_workspace_status_pipe(&mut self, active_tab_id: usize) {

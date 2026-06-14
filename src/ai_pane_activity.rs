@@ -127,6 +127,7 @@ impl State {
             fact,
         );
         self.sync_ai_activity_tab_decoration_for_tab(tab_id);
+        self.refresh_status_bar_cache();
         self.respond(pipe_message, RESULT_OK);
     }
 
@@ -180,6 +181,23 @@ impl State {
                     tab_position: *tab_position,
                     current_name,
                     base_name: self.ai_activity_tab_base_name_by_tab.get(tab_id).cloned(),
+                    active: self.tab_identity.active_tab_id() == Some(*tab_id),
+                    is_fullscreen_active: self
+                        .tab_fullscreen_active_by_tab
+                        .get(tab_id)
+                        .copied()
+                        .unwrap_or(false),
+                    is_sync_panes_active: self
+                        .tab_sync_panes_active_by_tab
+                        .get(tab_id)
+                        .copied()
+                        .unwrap_or(false),
+                    has_floating_panes: self
+                        .tab_pane_caches
+                        .terminal_panes_by_tab
+                        .get(tab_id)
+                        .map(|panes| panes.iter().any(|pane| pane.is_floating))
+                        .unwrap_or(false),
                     activity: self
                         .ai_pane_activity_by_tab
                         .get(tab_id)
