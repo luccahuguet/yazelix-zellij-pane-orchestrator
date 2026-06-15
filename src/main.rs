@@ -45,7 +45,7 @@ pub(crate) const RESULT_STALE_GENERATION: &str = "stale_generation";
 pub(crate) const RESULT_VERSION_MISMATCH: &str = "version_mismatch";
 pub(crate) const COMMAND_STEP_DELAY_MS: u64 = 35;
 pub(crate) const SWAP_LAYOUT_STEP_DELAY_MS: u64 = 1;
-const TAB_LOCAL_PANE_RECONCILE_DELAY: Duration = Duration::from_millis(50);
+const TAB_LOCAL_PANE_RECONCILE_DELAY: Duration = Duration::from_millis(500);
 
 #[derive(Default)]
 struct State {
