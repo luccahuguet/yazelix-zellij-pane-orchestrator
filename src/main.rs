@@ -64,6 +64,7 @@ struct State {
     ai_activity_tab_base_name_by_tab: HashMap<usize, String>,
     ai_activity_tab_decoration_last_write: Option<Instant>,
     ai_activity_tab_decoration_next_flush: Option<Instant>,
+    terminal_title_activity_next_reconcile: Option<Instant>,
     seen_tab_ids: HashSet<usize>,
     initial_workspace_state: Option<WorkspaceState>,
     runtime_dir: PathBuf,
@@ -122,15 +123,13 @@ impl ZellijPlugin for State {
         let mut subscriptions = vec![
             EventType::TabUpdate,
             EventType::PaneUpdate,
+            EventType::PaneClosed,
+            EventType::CommandPaneExited,
             EventType::PermissionRequestResult,
             EventType::Timer,
         ];
         if self.screen_saver_config.enabled {
-            subscriptions.extend([
-                EventType::InputReceived,
-                EventType::PaneClosed,
-                EventType::CommandPaneExited,
-            ]);
+            subscriptions.push(EventType::InputReceived);
         }
         subscribe(&subscriptions);
         self.schedule_initial_screen_saver_timeout();
@@ -189,6 +188,7 @@ impl ZellijPlugin for State {
                 self.permissions_granted = status == PermissionStatus::Granted;
                 if self.permissions_granted {
                     self.sync_ai_activity_tab_decorations_for_known_tabs();
+                    self.schedule_terminal_title_activity_reconcile_if_needed();
                 }
             }
             Event::InputReceived => self.record_screen_saver_input(),
@@ -197,14 +197,19 @@ impl ZellijPlugin for State {
                 self.record_orchestrator_timer();
                 self.handle_tab_local_pane_reconcile_timer();
                 self.handle_ai_activity_tab_decoration_timer();
+                self.handle_terminal_title_activity_reconcile_timer();
                 self.handle_screen_saver_timer();
                 self.handle_status_bar_claude_usage_timer();
                 self.handle_status_bar_codex_usage_timer();
                 self.handle_status_bar_opencode_go_usage_timer();
                 self.handle_orchestrator_heartbeat_timer();
             }
-            Event::PaneClosed(pane_id) => self.handle_screen_saver_pane_closed(pane_id),
+            Event::PaneClosed(pane_id) => {
+                self.handle_terminal_title_activity_pane_closed(pane_id);
+                self.handle_screen_saver_pane_closed(pane_id);
+            }
             Event::CommandPaneExited(terminal_id, _, _) => {
+                self.handle_terminal_title_activity_command_pane_exited(terminal_id);
                 self.handle_screen_saver_command_exit(terminal_id);
             }
             _ => {}
@@ -440,6 +445,7 @@ impl State {
                 self.status_bar_opencode_go_usage_next_refresh,
                 self.tab_local_pane_reconcile_next_flush,
                 self.ai_activity_tab_decoration_next_flush,
+                self.terminal_title_activity_next_reconcile,
                 self.orchestrator_heartbeat.next_flush,
             ],
             self.timer_armed_for,

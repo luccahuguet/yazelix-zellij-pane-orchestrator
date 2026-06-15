@@ -1,14 +1,14 @@
 use std::collections::HashSet;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use yazelix_zellij_pane_orchestrator::active_tab_session_state::SessionAiPaneActivity;
 use yazelix_zellij_pane_orchestrator::active_tab_session_state::SessionAiPaneActivityState;
 use yazelix_zellij_pane_orchestrator::ai_pane_activity_contract::{
     ai_activity_tab_decoration_state, ai_activity_tab_decoration_write_deadline,
     normalized_ai_activity_state, plan_ai_activity_tab_name, remove_ai_pane_activity_fact,
-    terminal_title_activity_state, upsert_ai_pane_activity_fact, AiActivityTabNamePlan,
-    AiPaneActivityRegistration, AI_ACTIVITY_TAB_DECORATION_MIN_WRITE_INTERVAL,
-    TERMINAL_TITLE_ACTIVITY_PROVIDER,
+    terminal_title_activity_poll_needed, terminal_title_activity_state,
+    upsert_ai_pane_activity_fact, AiActivityTabNamePlan, AiPaneActivityRegistration,
+    AI_ACTIVITY_TAB_DECORATION_MIN_WRITE_INTERVAL, TERMINAL_TITLE_ACTIVITY_PROVIDER,
 };
 use yazelix_zellij_pane_orchestrator::tab_activity_snapshot_contract::{
     build_all_tab_activity_snapshot_v1, AllTabActivitySnapshotV1, TabActivityReadState,
@@ -23,6 +23,8 @@ struct AiActivityTabDecorationPlan {
     current_name: String,
     name_plan: AiActivityTabNamePlan,
 }
+
+const TERMINAL_TITLE_ACTIVITY_RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
 
 impl State {
     pub(crate) fn reconcile_ai_pane_activity_tabs(&mut self, tabs: &[TabInfo]) {
@@ -215,44 +217,264 @@ impl State {
             .terminal_panes_by_tab
             .iter()
             .flat_map(|(tab_id, panes)| {
-                panes.iter().filter_map(move |pane| {
-                    let pane_id = pane_id_to_string(Some(pane.pane_id))?;
-                    Some((*tab_id, pane_id, pane.title.clone(), pane.is_focused))
-                })
+                panes
+                    .iter()
+                    .map(move |pane| (*tab_id, pane.pane_id, pane.title.clone(), pane.is_focused))
             })
             .collect::<Vec<_>>();
 
         for (tab_id, pane_id, title, is_focused) in observations {
-            let previous = self.ai_pane_activity_by_tab.get(&tab_id).and_then(|facts| {
-                facts
-                    .iter()
-                    .find(|fact| {
-                        fact.provider == TERMINAL_TITLE_ACTIVITY_PROVIDER && fact.pane_id == pane_id
-                    })
-                    .map(|fact| fact.state)
-            });
-            let Some(state) = terminal_title_activity_state(previous, &title, is_focused) else {
-                if let Some(facts) = self.ai_pane_activity_by_tab.get_mut(&tab_id) {
-                    remove_ai_pane_activity_fact(facts, TERMINAL_TITLE_ACTIVITY_PROVIDER, &pane_id);
-                }
+            self.reconcile_terminal_title_activity_observation(tab_id, pane_id, title, is_focused);
+        }
+
+        self.retain_nonempty_ai_activity_tabs();
+        self.schedule_terminal_title_activity_reconcile_if_needed();
+    }
+
+    fn reconcile_terminal_title_ai_activity_from_host_pane_info(&mut self) {
+        let poll_candidates = self.terminal_title_activity_poll_candidates();
+        for (tab_id, pane_id) in poll_candidates {
+            let Some(pane_info) = get_pane_info(pane_id) else {
+                self.remove_terminal_title_activity_fact_for_pane(pane_id);
                 continue;
             };
+            if pane_info.is_plugin {
+                self.remove_terminal_title_activity_fact_for_pane(pane_id);
+                continue;
+            }
 
-            let tab_position = self
-                .tab_identity
-                .position_for_tab_id(tab_id)
-                .unwrap_or(tab_id);
-            upsert_ai_pane_activity_fact(
-                self.ai_pane_activity_by_tab.entry(tab_id).or_default(),
-                SessionAiPaneActivity::tab_local(
-                    tab_position,
-                    TERMINAL_TITLE_ACTIVITY_PROVIDER.to_string(),
-                    pane_id,
-                    state,
-                ),
+            self.update_cached_terminal_pane_info(tab_id, pane_id, &pane_info);
+            self.reconcile_terminal_title_activity_observation(
+                tab_id,
+                pane_id,
+                pane_info.title,
+                pane_info.is_focused,
             );
         }
 
+        self.retain_nonempty_ai_activity_tabs();
+        self.schedule_terminal_title_activity_reconcile_if_needed();
+    }
+
+    fn reconcile_terminal_title_activity_observation(
+        &mut self,
+        tab_id: usize,
+        pane_id: PaneId,
+        title: String,
+        is_focused: bool,
+    ) {
+        let Some(pane_id) = pane_id_to_string(Some(pane_id)) else {
+            return;
+        };
+        let previous = self.ai_pane_activity_by_tab.get(&tab_id).and_then(|facts| {
+            facts
+                .iter()
+                .find(|fact| {
+                    fact.provider == TERMINAL_TITLE_ACTIVITY_PROVIDER && fact.pane_id == pane_id
+                })
+                .map(|fact| fact.state)
+        });
+        let is_active_tab_focus = is_focused && self.tab_identity.active_tab_id() == Some(tab_id);
+        let Some(state) = terminal_title_activity_state(previous, &title, is_active_tab_focus)
+        else {
+            self.remove_terminal_title_activity_fact(tab_id, &pane_id);
+            return;
+        };
+
+        let tab_position = self
+            .tab_identity
+            .position_for_tab_id(tab_id)
+            .unwrap_or(tab_id);
+        upsert_ai_pane_activity_fact(
+            self.ai_pane_activity_by_tab.entry(tab_id).or_default(),
+            SessionAiPaneActivity::tab_local(
+                tab_position,
+                TERMINAL_TITLE_ACTIVITY_PROVIDER.to_string(),
+                pane_id,
+                state,
+            ),
+        );
+    }
+
+    fn terminal_title_activity_poll_candidates(&self) -> Vec<(usize, PaneId)> {
+        let active_tab_id = self.tab_identity.active_tab_id();
+        let active_title_pane_ids = self.terminal_title_activity_fact_pane_ids();
+        self.tab_pane_caches
+            .terminal_panes_by_tab
+            .iter()
+            .flat_map(|(tab_id, panes)| {
+                panes.iter().filter_map(|pane| {
+                    let pane_id = pane_id_to_string(Some(pane.pane_id))?;
+                    (Some(*tab_id) != active_tab_id || active_title_pane_ids.contains(&pane_id))
+                        .then_some((*tab_id, pane.pane_id))
+                })
+            })
+            .collect()
+    }
+
+    fn terminal_title_activity_fact_tab_ids(&self) -> Vec<usize> {
+        self.ai_pane_activity_by_tab
+            .iter()
+            .filter(|(_, facts)| {
+                facts
+                    .iter()
+                    .any(|fact| fact.provider == TERMINAL_TITLE_ACTIVITY_PROVIDER)
+            })
+            .map(|(tab_id, _)| *tab_id)
+            .collect()
+    }
+
+    fn terminal_title_activity_fact_pane_ids(&self) -> HashSet<String> {
+        self.ai_pane_activity_by_tab
+            .values()
+            .flat_map(|facts| {
+                facts
+                    .iter()
+                    .filter(|fact| fact.provider == TERMINAL_TITLE_ACTIVITY_PROVIDER)
+                    .map(|fact| fact.pane_id.clone())
+            })
+            .collect()
+    }
+
+    pub(crate) fn schedule_terminal_title_activity_reconcile_if_needed(&mut self) {
+        if !self.permissions_granted {
+            self.terminal_title_activity_next_reconcile = None;
+            return;
+        }
+
+        let terminal_pane_tab_ids = self
+            .tab_pane_caches
+            .terminal_panes_by_tab
+            .iter()
+            .flat_map(|(tab_id, panes)| panes.iter().map(move |_| *tab_id))
+            .collect::<Vec<_>>();
+        let terminal_title_activity_fact_tab_ids = self.terminal_title_activity_fact_tab_ids();
+        if !terminal_title_activity_poll_needed(
+            self.tab_identity.active_tab_id(),
+            &terminal_pane_tab_ids,
+            &terminal_title_activity_fact_tab_ids,
+        ) {
+            self.terminal_title_activity_next_reconcile = None;
+            return;
+        }
+
+        let deadline = Instant::now() + TERMINAL_TITLE_ACTIVITY_RECONCILE_INTERVAL;
+        if self
+            .terminal_title_activity_next_reconcile
+            .map(|existing| deadline < existing)
+            .unwrap_or(true)
+        {
+            self.terminal_title_activity_next_reconcile = Some(deadline);
+            self.arm_next_timer();
+        }
+    }
+
+    pub(crate) fn handle_terminal_title_activity_reconcile_timer(&mut self) {
+        let Some(deadline) = self.terminal_title_activity_next_reconcile else {
+            return;
+        };
+        if Instant::now() < deadline {
+            return;
+        }
+
+        self.terminal_title_activity_next_reconcile = None;
+        self.reconcile_terminal_title_ai_activity_from_host_pane_info();
+        self.sync_ai_activity_tab_decorations_for_known_tabs();
+    }
+
+    pub(crate) fn handle_terminal_title_activity_pane_closed(&mut self, pane_id: PaneId) {
+        if self.remove_terminal_title_activity_fact_for_pane(pane_id) {
+            self.sync_ai_activity_tab_decorations_for_known_tabs();
+        }
+        self.schedule_terminal_title_activity_reconcile_if_needed();
+    }
+
+    pub(crate) fn handle_terminal_title_activity_command_pane_exited(&mut self, terminal_id: u32) {
+        let pane_id = PaneId::Terminal(terminal_id);
+        let Some(tab_id) = self.find_tab_id_for_terminal_pane(pane_id) else {
+            self.remove_terminal_title_activity_fact_for_pane(pane_id);
+            self.schedule_terminal_title_activity_reconcile_if_needed();
+            return;
+        };
+
+        if let Some(pane_info) = get_pane_info(pane_id) {
+            self.update_cached_terminal_pane_info(tab_id, pane_id, &pane_info);
+            self.reconcile_terminal_title_activity_observation(
+                tab_id,
+                pane_id,
+                pane_info.title,
+                pane_info.is_focused,
+            );
+        } else {
+            self.remove_terminal_title_activity_fact_for_pane(pane_id);
+        }
+        self.retain_nonempty_ai_activity_tabs();
+        self.sync_ai_activity_tab_decorations_for_known_tabs();
+        self.schedule_terminal_title_activity_reconcile_if_needed();
+    }
+
+    fn find_tab_id_for_terminal_pane(&self, pane_id: PaneId) -> Option<usize> {
+        self.tab_pane_caches
+            .terminal_panes_by_tab
+            .iter()
+            .find(|(_, panes)| panes.iter().any(|pane| pane.pane_id == pane_id))
+            .map(|(tab_id, _)| *tab_id)
+    }
+
+    fn update_cached_terminal_pane_info(
+        &mut self,
+        tab_id: usize,
+        pane_id: PaneId,
+        pane_info: &PaneInfo,
+    ) {
+        let Some(panes) = self.tab_pane_caches.terminal_panes_by_tab.get_mut(&tab_id) else {
+            return;
+        };
+        let Some(pane) = panes.iter_mut().find(|pane| pane.pane_id == pane_id) else {
+            return;
+        };
+
+        pane.title.clone_from(&pane_info.title);
+        pane.terminal_command
+            .clone_from(&pane_info.terminal_command);
+        pane.is_focused = pane_info.is_focused;
+        pane.is_floating = pane_info.is_floating;
+        pane.pane_x = pane_info.pane_x;
+        pane.pane_y = pane_info.pane_y;
+        pane.pane_columns = pane_info.pane_columns;
+        pane.pane_rows = pane_info.pane_rows;
+    }
+
+    fn remove_terminal_title_activity_fact(&mut self, tab_id: usize, pane_id: &str) -> bool {
+        let Some(facts) = self.ai_pane_activity_by_tab.get_mut(&tab_id) else {
+            return false;
+        };
+
+        let previous_len = facts.len();
+        remove_ai_pane_activity_fact(facts, TERMINAL_TITLE_ACTIVITY_PROVIDER, pane_id);
+        let changed = facts.len() != previous_len;
+        let is_empty = facts.is_empty();
+        if is_empty {
+            self.ai_pane_activity_by_tab.remove(&tab_id);
+        }
+        changed
+    }
+
+    fn remove_terminal_title_activity_fact_for_pane(&mut self, pane_id: PaneId) -> bool {
+        let Some(pane_id) = pane_id_to_string(Some(pane_id)) else {
+            return false;
+        };
+        let mut changed = false;
+        for facts in self.ai_pane_activity_by_tab.values_mut() {
+            let previous_len = facts.len();
+            remove_ai_pane_activity_fact(facts, TERMINAL_TITLE_ACTIVITY_PROVIDER, &pane_id);
+            changed |= facts.len() != previous_len;
+        }
+        self.retain_nonempty_ai_activity_tabs();
+        changed
+    }
+
+    fn retain_nonempty_ai_activity_tabs(&mut self) {
         self.ai_pane_activity_by_tab
             .retain(|_, facts| !facts.is_empty());
     }
