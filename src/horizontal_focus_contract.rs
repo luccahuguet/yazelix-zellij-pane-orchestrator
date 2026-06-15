@@ -11,6 +11,26 @@ pub enum HorizontalPaneRole {
     Other,
 }
 
+pub fn horizontal_role_for_pane<Id: PartialEq>(
+    pane_id: &Id,
+    pane_title: &str,
+    sidebar_pane_id: Option<&Id>,
+    agent_pane_id: Option<&Id>,
+) -> HorizontalPaneRole {
+    if sidebar_pane_id == Some(pane_id) {
+        return HorizontalPaneRole::Sidebar;
+    }
+    if agent_pane_id == Some(pane_id) {
+        return HorizontalPaneRole::Agent;
+    }
+
+    match pane_title.trim() {
+        "sidebar" => HorizontalPaneRole::Sidebar,
+        "agent" => HorizontalPaneRole::Agent,
+        _ => HorizontalPaneRole::Other,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HorizontalPaneSnapshot {
     pub role: HorizontalPaneRole,
@@ -105,8 +125,8 @@ pub fn resolve_horizontal_focus(
 #[cfg(test)]
 mod tests {
     use super::{
-        resolve_horizontal_focus, HorizontalDirection, HorizontalFocusPlan, HorizontalPaneRole,
-        HorizontalPaneSnapshot,
+        horizontal_role_for_pane, resolve_horizontal_focus, HorizontalDirection,
+        HorizontalFocusPlan, HorizontalPaneRole, HorizontalPaneSnapshot,
     };
 
     // Defends: leftward focus skips a closed sidebar instead of treating it as a real target.
@@ -276,6 +296,16 @@ mod tests {
         assert_eq!(
             resolve_horizontal_focus(&panes, HorizontalDirection::Right, true, false),
             HorizontalFocusPlan::NextTab
+        );
+    }
+
+    // Regression: activity-driven terminal titles must not make a managed agent pane look like
+    // an ordinary pane while horizontal navigation is deciding whether to leave the tab.
+    #[test]
+    fn managed_agent_identity_wins_over_activity_mutated_title() {
+        assert_eq!(
+            horizontal_role_for_pane(&7, "[...] codex", None, Some(&7)),
+            HorizontalPaneRole::Agent
         );
     }
 }

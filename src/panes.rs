@@ -7,7 +7,7 @@ use yazelix_zellij_pane_orchestrator::active_tab_session_state::{
     SessionWorkspace,
 };
 use yazelix_zellij_pane_orchestrator::horizontal_focus_contract::{
-    resolve_horizontal_focus, HorizontalDirection, HorizontalFocusPlan, HorizontalPaneRole,
+    horizontal_role_for_pane, resolve_horizontal_focus, HorizontalDirection, HorizontalFocusPlan,
     HorizontalPaneSnapshot,
 };
 use yazelix_zellij_pane_orchestrator::pane_contract::{
@@ -605,14 +605,23 @@ impl State {
 
         let sidebar_is_closed = self.sidebar_is_closed(active_tab_id).unwrap_or(false);
         let agent_is_closed = self.agent_is_closed(active_tab_id).unwrap_or(false);
+        let managed_tab_panes = self
+            .tab_pane_caches
+            .managed_panes_by_tab
+            .get(&active_tab_id)
+            .cloned()
+            .unwrap_or_default();
+        let managed_sidebar_pane_id = managed_tab_panes.sidebar.map(|managed| managed.pane_id);
+        let managed_agent_pane_id = managed_tab_panes.agent.map(|managed| managed.pane_id);
         let pane_snapshots: Vec<HorizontalPaneSnapshot> = terminal_panes
             .iter()
             .map(|pane| HorizontalPaneSnapshot {
-                role: match pane.title.trim() {
-                    SIDEBAR_TITLE => HorizontalPaneRole::Sidebar,
-                    AGENT_TITLE => HorizontalPaneRole::Agent,
-                    _ => HorizontalPaneRole::Other,
-                },
+                role: horizontal_role_for_pane(
+                    &pane.pane_id,
+                    &pane.title,
+                    managed_sidebar_pane_id.as_ref(),
+                    managed_agent_pane_id.as_ref(),
+                ),
                 is_plugin: false,
                 exited: false,
                 is_focused: pane.is_focused,
