@@ -178,8 +178,7 @@ impl ZellijPlugin for State {
                     .collect();
                 self.retain_tab_local_pane_state_for_current_tabs();
                 if let Some(pane_manifest) = self.last_pane_manifest.clone() {
-                    self.tab_local_pane_reconcile_next_flush = None;
-                    self.rebuild_tab_local_pane_state(&pane_manifest);
+                    self.rebuild_tab_local_pane_state_or_defer(&pane_manifest);
                 }
             }
             Event::PaneUpdate(pane_manifest) => {
