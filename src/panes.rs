@@ -16,7 +16,9 @@ use yazelix_zellij_pane_orchestrator::pane_contract::{
 use yazelix_zellij_pane_orchestrator::sidebar_contract::{
     resolve_sidebar_focus_toggle, SidebarFocusTogglePlan,
 };
-use yazelix_zellij_pane_orchestrator::tab_identity_contract::retain_current_tab_state;
+use yazelix_zellij_pane_orchestrator::tab_identity_contract::{
+    position_pane_identity_conflicts_with_cached_tabs, retain_current_tab_state,
+};
 use yazelix_zellij_pane_orchestrator::transient_pane_contract::{
     select_transient_pane, transient_pane_identity, TransientPaneKind, TransientPaneSnapshot,
 };
@@ -122,8 +124,58 @@ impl TabPaneCaches {
             .values()
             .any(|id| *id == plugin_id)
     }
+
+    pub(crate) fn pane_manifest_conflicts_with_cached_tab_positions(
+        &self,
+        pane_manifest: &PaneManifest,
+        tab_id_by_position: &HashMap<usize, usize>,
+    ) -> bool {
+        pane_manifest_conflicts_with_cached_tab_positions(
+            pane_manifest,
+            tab_id_by_position,
+            &self.terminal_panes_by_tab,
+        )
+    }
 }
 
+pub(crate) fn pane_manifest_conflicts_with_cached_tab_positions(
+    pane_manifest: &PaneManifest,
+    tab_id_by_position: &HashMap<usize, usize>,
+    previous_terminal_panes_by_tab: &HashMap<usize, Vec<TerminalPaneLayout>>,
+) -> bool {
+    let previous_pane_ids_by_tab = previous_terminal_panes_by_tab
+        .iter()
+        .map(|(tab_id, panes)| {
+            let pane_ids = panes
+                .iter()
+                .filter_map(|pane| match pane.pane_id {
+                    PaneId::Terminal(id) => Some(id),
+                    PaneId::Plugin(_) => None,
+                })
+                .collect::<HashSet<_>>();
+            (*tab_id, pane_ids)
+        })
+        .collect::<HashMap<_, _>>();
+
+    let current_pane_ids_by_position = pane_manifest
+        .panes
+        .iter()
+        .map(|(tab_position, panes)| {
+            let current_pane_ids = panes
+                .iter()
+                .filter(|pane| !pane.is_plugin && !pane.exited)
+                .map(|pane| pane.id)
+                .collect::<HashSet<_>>();
+            (*tab_position, current_pane_ids)
+        })
+        .collect::<HashMap<_, _>>();
+
+    position_pane_identity_conflicts_with_cached_tabs(
+        &current_pane_ids_by_position,
+        tab_id_by_position,
+        &previous_pane_ids_by_tab,
+    )
+}
 #[derive(Serialize)]
 struct MaintainerDebugEditorState {
     permissions_granted: bool,

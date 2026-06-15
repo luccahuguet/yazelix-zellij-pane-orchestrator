@@ -14,7 +14,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use workspace::{bootstrap_workspace_root, WorkspaceState};
 use yazelix_zellij_pane_orchestrator::active_tab_session_state::SessionAiPaneActivity;
 use yazelix_zellij_pane_orchestrator::horizontal_focus_contract::HorizontalDirection;
@@ -45,6 +45,7 @@ pub(crate) const RESULT_STALE_GENERATION: &str = "stale_generation";
 pub(crate) const RESULT_VERSION_MISMATCH: &str = "version_mismatch";
 pub(crate) const COMMAND_STEP_DELAY_MS: u64 = 35;
 pub(crate) const SWAP_LAYOUT_STEP_DELAY_MS: u64 = 1;
+const TAB_LOCAL_PANE_RECONCILE_DELAY: Duration = Duration::from_millis(50);
 
 #[derive(Default)]
 struct State {
@@ -53,6 +54,7 @@ struct State {
     last_known_layout_variant_by_tab: RefCell<HashMap<usize, LayoutVariant>>,
     tab_pane_caches: panes::TabPaneCaches,
     last_pane_manifest: Option<PaneManifest>,
+    tab_local_pane_reconcile_next_flush: Option<Instant>,
     tab_name_by_tab_id: HashMap<usize, String>,
     tab_fullscreen_active_by_tab: HashMap<usize, bool>,
     tab_sync_panes_active_by_tab: HashMap<usize, bool>,
@@ -176,12 +178,13 @@ impl ZellijPlugin for State {
                     .collect();
                 self.retain_tab_local_pane_state_for_current_tabs();
                 if let Some(pane_manifest) = self.last_pane_manifest.clone() {
+                    self.tab_local_pane_reconcile_next_flush = None;
                     self.rebuild_tab_local_pane_state(&pane_manifest);
                 }
             }
             Event::PaneUpdate(pane_manifest) => {
                 self.last_pane_manifest = Some(pane_manifest.clone());
-                self.rebuild_tab_local_pane_state(&pane_manifest);
+                self.rebuild_tab_local_pane_state_or_defer(&pane_manifest);
             }
             Event::PermissionRequestResult(status) => {
                 self.permissions_granted = status == PermissionStatus::Granted;
@@ -193,6 +196,7 @@ impl ZellijPlugin for State {
             Event::Timer(_) => {
                 self.timer_armed_for = None;
                 self.record_orchestrator_timer();
+                self.handle_tab_local_pane_reconcile_timer();
                 self.handle_ai_activity_tab_decoration_timer();
                 self.handle_screen_saver_timer();
                 self.handle_status_bar_claude_usage_timer();
@@ -341,6 +345,53 @@ impl State {
         self.reconcile_ai_pane_activity_panes();
     }
 
+    fn rebuild_tab_local_pane_state_or_defer(&mut self, pane_manifest: &PaneManifest) {
+        if self
+            .tab_pane_caches
+            .pane_manifest_conflicts_with_cached_tab_positions(
+                pane_manifest,
+                self.tab_identity.tab_id_by_position(),
+            )
+        {
+            self.schedule_tab_local_pane_reconcile_flush();
+            return;
+        }
+
+        self.tab_local_pane_reconcile_next_flush = None;
+        self.rebuild_tab_local_pane_state(pane_manifest);
+    }
+
+    fn schedule_tab_local_pane_reconcile_flush(&mut self) {
+        self.tab_local_pane_reconcile_next_flush =
+            Some(Instant::now() + TAB_LOCAL_PANE_RECONCILE_DELAY);
+        self.arm_next_timer();
+    }
+
+    fn handle_tab_local_pane_reconcile_timer(&mut self) {
+        let Some(deadline) = self.tab_local_pane_reconcile_next_flush else {
+            return;
+        };
+        if Instant::now() < deadline {
+            return;
+        }
+
+        self.tab_local_pane_reconcile_next_flush = None;
+        let Some(pane_manifest) = self.last_pane_manifest.clone() else {
+            return;
+        };
+        if self
+            .tab_pane_caches
+            .pane_manifest_conflicts_with_cached_tab_positions(
+                &pane_manifest,
+                self.tab_identity.tab_id_by_position(),
+            )
+        {
+            return;
+        }
+
+        self.rebuild_tab_local_pane_state(&pane_manifest);
+    }
+
     fn retain_tab_local_pane_state_for_current_tabs(&mut self) {
         let current_tab_ids = self.tab_identity.current_tab_ids();
         if current_tab_ids.is_empty() {
@@ -388,6 +439,7 @@ impl State {
                 self.status_bar_claude_usage_next_refresh,
                 self.status_bar_codex_usage_next_refresh,
                 self.status_bar_opencode_go_usage_next_refresh,
+                self.tab_local_pane_reconcile_next_flush,
                 self.ai_activity_tab_decoration_next_flush,
                 self.orchestrator_heartbeat.next_flush,
             ],
