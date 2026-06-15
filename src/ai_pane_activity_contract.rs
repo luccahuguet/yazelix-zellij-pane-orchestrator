@@ -105,17 +105,6 @@ pub fn terminal_title_activity_state(
         .map(|_| SessionAiPaneActivityState::Stale)
 }
 
-pub fn terminal_title_activity_poll_needed(
-    active_tab_id: Option<usize>,
-    terminal_pane_tab_ids: &[usize],
-    terminal_title_activity_fact_tab_ids: &[usize],
-) -> bool {
-    !terminal_title_activity_fact_tab_ids.is_empty()
-        || terminal_pane_tab_ids
-            .iter()
-            .any(|tab_id| Some(*tab_id) != active_tab_id)
-}
-
 pub fn decorate_ai_activity_tab_name(
     tab_name: &str,
     state: AiActivityTabDecorationState,
@@ -355,14 +344,6 @@ mod tests {
             ),
             None
         );
-    }
-
-    // Regression: hidden-tab terminal title changes can be missed until the tab is visited, so inactive tabs need a polling backup.
-    #[test]
-    fn terminal_title_activity_poll_covers_inactive_terminal_tabs() {
-        assert!(terminal_title_activity_poll_needed(Some(1), &[1, 2], &[]));
-        assert!(terminal_title_activity_poll_needed(Some(1), &[], &[2]));
-        assert!(!terminal_title_activity_poll_needed(Some(1), &[1], &[]));
     }
 
     // Defends: tab-level activity decoration preserves the user's base tab name and clears only Yazelix's own marker.
