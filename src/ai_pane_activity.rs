@@ -374,16 +374,14 @@ impl State {
                 rename_tab_with_id(plan.tab_id as u64, &plan.name_plan.display_name);
                 issued_native_rename = true;
             }
+            self.tab_name_by_tab_id
+                .insert(plan.tab_id, plan.name_plan.display_name.clone());
 
             if let Some(base_name) = plan.name_plan.base_name {
                 self.ai_activity_tab_base_name_by_tab
                     .insert(plan.tab_id, base_name);
-            } else if plan.name_plan.display_name == plan.current_name {
+            } else {
                 self.ai_activity_tab_base_name_by_tab.remove(&plan.tab_id);
-            }
-            if plan.name_plan.display_name == plan.current_name {
-                self.tab_name_by_tab_id
-                    .insert(plan.tab_id, plan.name_plan.display_name);
             }
         }
         issued_native_rename

@@ -127,6 +127,14 @@ pub fn terminal_activity_title_base(title: &str) -> Option<&str> {
     (!base_name.is_empty()).then_some(base_name)
 }
 
+fn ai_activity_marker_base(tab_name: &str) -> Option<&str> {
+    [AI_ACTIVITY_BUSY_TAB_MARKER, AI_ACTIVITY_ALERT_TAB_MARKER]
+        .iter()
+        .find_map(|marker| tab_name.strip_prefix(marker))
+        .map(str::trim)
+        .filter(|base_name| !base_name.is_empty())
+}
+
 pub fn plan_ai_activity_tab_name(
     current_name: &str,
     previous_base_name: Option<&str>,
@@ -135,7 +143,11 @@ pub fn plan_ai_activity_tab_name(
     if state != AiActivityTabDecorationState::Idle {
         let base_name = previous_base_name
             .filter(|base_name| tab_name_is_activity_decoration_for_base(current_name, base_name))
-            .unwrap_or_else(|| terminal_activity_title_base(current_name).unwrap_or(current_name))
+            .unwrap_or_else(|| {
+                terminal_activity_title_base(current_name)
+                    .or_else(|| ai_activity_marker_base(current_name))
+                    .unwrap_or(current_name)
+            })
             .to_string();
         return AiActivityTabNamePlan {
             display_name: decorate_ai_activity_tab_name(&base_name, state),
@@ -155,9 +167,8 @@ pub fn plan_ai_activity_tab_name(
 
 fn tab_name_is_activity_decoration_for_base(tab_name: &str, base_name: &str) -> bool {
     tab_name == base_name
-        || tab_name == decorate_ai_activity_tab_name(base_name, AiActivityTabDecorationState::Busy)
-        || tab_name == decorate_ai_activity_tab_name(base_name, AiActivityTabDecorationState::Alert)
-        || terminal_activity_title_base(tab_name).is_some()
+        || ai_activity_marker_base(tab_name) == Some(base_name)
+        || terminal_activity_title_base(tab_name) == Some(base_name)
 }
 
 pub fn ai_activity_tab_decoration_write_deadline(
@@ -409,20 +420,20 @@ mod tests {
         assert_eq!(
             busy_user_marker,
             AiActivityTabNamePlan {
-                display_name: "[...] [...] scratch".into(),
-                base_name: Some("[...] scratch".into()),
+                display_name: "[...] scratch".into(),
+                base_name: Some("scratch".into()),
             }
         );
 
         let restored_user_marker = plan_ai_activity_tab_name(
-            "[...] [...] scratch",
-            Some("[...] scratch"),
+            "[...] scratch",
+            Some("scratch"),
             AiActivityTabDecorationState::Idle,
         );
         assert_eq!(
             restored_user_marker,
             AiActivityTabNamePlan {
-                display_name: "[...] scratch".into(),
+                display_name: "scratch".into(),
                 base_name: None,
             }
         );
