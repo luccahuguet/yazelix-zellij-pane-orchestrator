@@ -154,10 +154,14 @@ impl State {
         let Some(right_sidebar_command) = self.right_sidebar_command.as_ref() else {
             return Err(RESULT_MISSING);
         };
+        let Some(workspace_state) = self.workspace_state_for_tab(active_tab_id) else {
+            return Err(RESULT_MISSING);
+        };
+        let launch_spec = right_sidebar_command.launch_spec(&workspace_state.root);
         let command_to_run = CommandToRun {
-            path: PathBuf::from(&right_sidebar_command.command),
-            args: right_sidebar_command.args.clone(),
-            cwd: None,
+            path: PathBuf::from(launch_spec.command),
+            args: launch_spec.args,
+            cwd: Some(PathBuf::from(launch_spec.cwd)),
         };
         let Some(agent_pane_id) = open_command_pane(command_to_run, BTreeMap::new()) else {
             return Err(RESULT_MISSING);
