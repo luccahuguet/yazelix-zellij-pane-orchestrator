@@ -62,6 +62,8 @@ pub fn resolve_status_bar_cache_runtime(
         "YAZELIX_RUNTIME_DIR",
         "YAZELIX_SESSION_CONFIG_PATH",
         "YAZELIX_STATUS_BAR_CACHE_PATH",
+        "YAZELIX_ZELLIJ_SESSION_NAME",
+        "ZELLIJ_SESSION_NAME",
     ] {
         if let Some(value) = session_env.get(key).filter(|value| !value.is_empty()) {
             env.insert(key.to_string(), value.clone());

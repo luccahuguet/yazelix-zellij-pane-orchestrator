@@ -1,6 +1,7 @@
-use std::collections::HashSet;
-use std::time::Instant;
+use std::collections::{BTreeMap, HashSet};
+use std::time::{Duration, Instant};
 
+use serde::Deserialize;
 use yazelix_zellij_pane_orchestrator::active_tab_session_state::SessionAiPaneActivity;
 use yazelix_zellij_pane_orchestrator::active_tab_session_state::SessionAiPaneActivityState;
 use yazelix_zellij_pane_orchestrator::ai_pane_activity_contract::{
@@ -24,6 +25,18 @@ struct AiActivityTabDecorationPlan {
     name_plan: AiActivityTabNamePlan,
 }
 
+#[derive(Deserialize)]
+struct TerminalTitleActivitySnapshotObservation {
+    tab_id: usize,
+    pane_id: u32,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    is_focused: bool,
+}
+
+const TERMINAL_TITLE_ACTIVITY_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
+
 impl State {
     pub(crate) fn reconcile_ai_pane_activity_tabs(&mut self, tabs: &[TabInfo]) {
         let current_tab_ids = tabs.iter().map(|tab| tab.tab_id).collect::<HashSet<_>>();
@@ -33,6 +46,7 @@ impl State {
             .retain(|tab_id, _| current_tab_ids.contains(tab_id));
         self.reconcile_terminal_title_ai_activity();
         self.sync_ai_activity_tab_decorations_for_tabs(tabs);
+        self.schedule_terminal_title_activity_refresh_if_needed();
     }
 
     pub(crate) fn reconcile_ai_pane_activity_panes(&mut self) {
@@ -61,6 +75,7 @@ impl State {
             });
         self.reconcile_terminal_title_ai_activity();
         self.sync_ai_activity_tab_decorations_for_known_tabs();
+        self.schedule_terminal_title_activity_refresh_if_needed();
     }
 
     pub(crate) fn register_ai_pane_activity(&mut self, pipe_message: &PipeMessage) {
@@ -127,6 +142,58 @@ impl State {
         );
         self.sync_ai_activity_tab_decoration_for_tab(tab_id);
         self.refresh_status_bar_cache();
+        self.respond(pipe_message, RESULT_OK);
+    }
+
+    pub(crate) fn reconcile_terminal_title_activity_snapshot(
+        &mut self,
+        pipe_message: &PipeMessage,
+    ) {
+        if !self.permissions_granted {
+            self.respond(pipe_message, RESULT_DENIED);
+            return;
+        }
+
+        let Some(payload) = pipe_message.payload.as_deref() else {
+            self.respond(pipe_message, RESULT_INVALID_PAYLOAD);
+            return;
+        };
+
+        let observations: Vec<TerminalTitleActivitySnapshotObservation> =
+            match serde_json::from_str(payload) {
+                Ok(observations) => observations,
+                Err(_) => {
+                    self.respond(pipe_message, RESULT_INVALID_PAYLOAD);
+                    return;
+                }
+            };
+
+        let mut observed_terminal_panes = HashSet::new();
+        for observation in observations {
+            if self
+                .tab_identity
+                .position_for_tab_id(observation.tab_id)
+                .is_none()
+            {
+                continue;
+            }
+            let pane_id = PaneId::Terminal(observation.pane_id);
+            if let Some(pane_key) = pane_id_to_string(Some(pane_id)) {
+                observed_terminal_panes.insert((observation.tab_id, pane_key));
+            }
+            self.reconcile_terminal_title_activity_observation(
+                observation.tab_id,
+                pane_id,
+                observation.title,
+                observation.is_focused,
+            );
+        }
+
+        self.retain_terminal_title_activity_snapshot_facts(&observed_terminal_panes);
+        self.retain_nonempty_ai_activity_tabs();
+        self.sync_ai_activity_tab_decorations_for_known_tabs();
+        self.refresh_status_bar_cache();
+        self.schedule_terminal_title_activity_refresh_if_needed();
         self.respond(pipe_message, RESULT_OK);
     }
 
@@ -312,6 +379,74 @@ impl State {
     fn retain_nonempty_ai_activity_tabs(&mut self) {
         self.ai_pane_activity_by_tab
             .retain(|_, facts| !facts.is_empty());
+    }
+
+    fn retain_terminal_title_activity_snapshot_facts(
+        &mut self,
+        observed_terminal_panes: &HashSet<(usize, String)>,
+    ) {
+        for (tab_id, facts) in self.ai_pane_activity_by_tab.iter_mut() {
+            facts.retain(|fact| {
+                fact.provider != TERMINAL_TITLE_ACTIVITY_PROVIDER
+                    || observed_terminal_panes.contains(&(*tab_id, fact.pane_id.clone()))
+            });
+        }
+    }
+
+    fn terminal_title_activity_refresh_needed(&self) -> bool {
+        self.ai_pane_activity_by_tab.values().any(|facts| {
+            facts.iter().any(|fact| {
+                fact.provider == TERMINAL_TITLE_ACTIVITY_PROVIDER
+                    && matches!(
+                        fact.state,
+                        SessionAiPaneActivityState::Active | SessionAiPaneActivityState::Thinking
+                    )
+            })
+        })
+    }
+
+    fn schedule_terminal_title_activity_refresh_if_needed(&mut self) {
+        if !self.permissions_granted || !self.terminal_title_activity_refresh_needed() {
+            self.terminal_title_activity_refresh_next_flush = None;
+            return;
+        }
+
+        if self.terminal_title_activity_refresh_next_flush.is_none() {
+            self.terminal_title_activity_refresh_next_flush =
+                Some(Instant::now() + TERMINAL_TITLE_ACTIVITY_REFRESH_INTERVAL);
+            self.arm_next_timer();
+        }
+    }
+
+    pub(crate) fn handle_terminal_title_activity_refresh_timer(&mut self) {
+        let Some(deadline) = self.terminal_title_activity_refresh_next_flush else {
+            return;
+        };
+        if Instant::now() < deadline {
+            return;
+        }
+
+        self.terminal_title_activity_refresh_next_flush = None;
+        if !self.permissions_granted || !self.terminal_title_activity_refresh_needed() {
+            return;
+        }
+
+        if self.run_terminal_title_activity_refresh_command() {
+            self.schedule_terminal_title_activity_refresh_if_needed();
+        }
+    }
+
+    fn run_terminal_title_activity_refresh_command(&mut self) -> bool {
+        let Some(runtime) = self.status_bar_runtime() else {
+            return false;
+        };
+        let command = [
+            runtime.yzx_control_path.as_str(),
+            "zellij",
+            "refresh-terminal-title-activity",
+        ];
+        run_command_with_env_variables_and_cwd(&command, runtime.env, runtime.cwd, BTreeMap::new());
+        true
     }
 
     fn find_tab_id_for_terminal_pane_id(&self, pane_id: &str) -> Option<usize> {
