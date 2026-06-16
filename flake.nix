@@ -38,6 +38,7 @@
           packageAttr = "yazelix_zellij_pane_orchestrator";
           wasmPath = "share/yazelix_zellij_pane_orchestrator/yazelix_pane_orchestrator.wasm";
           wasmTarget = "wasm32-wasip1";
+          cargoAuditableDisabled = true;
           cargoBuildHookDisabled = true;
           preBuildPreservesNixRustToolchain = true;
           wasmTargetRustcEnvPinned = true;
@@ -49,6 +50,7 @@
           version = "0.1.0";
           src = pkgs.lib.cleanSource ./.;
           cargoLock.lockFile = ./Cargo.lock;
+          auditable = !zellijPluginWasmPackageContract.cargoAuditableDisabled;
           dontCargoBuild = zellijPluginWasmPackageContract.cargoBuildHookDisabled;
           doCheck = false;
 
