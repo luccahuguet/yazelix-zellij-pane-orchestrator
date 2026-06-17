@@ -123,7 +123,7 @@ mod tests {
             TabActivityReadState {
                 tab_id: 30,
                 tab_position: 2,
-                current_name: "[...] agent".to_string(),
+                current_name: "agent ·".to_string(),
                 base_name: Some("agent".to_string()),
                 active: false,
                 is_fullscreen_active: false,
@@ -241,6 +241,8 @@ mod tests {
         assert!(!serialized.contains("#["));
         assert!(!serialized.contains("[...]"));
         assert!(!serialized.contains("[!]"));
+        assert!(!serialized.contains(" ·"));
+        assert!(!serialized.contains(" ✓"));
         assert!(!serialized.contains("zjstatus"));
     }
 }

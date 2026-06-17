@@ -304,7 +304,7 @@ mod tests {
     #[test]
     fn managed_agent_identity_wins_over_activity_mutated_title() {
         assert_eq!(
-            horizontal_role_for_pane(&7, "[...] codex", None, Some(&7)),
+            horizontal_role_for_pane(&7, "codex ·", None, Some(&7)),
             HorizontalPaneRole::Agent
         );
     }

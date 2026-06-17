@@ -4,11 +4,13 @@ use serde::Deserialize;
 
 use crate::active_tab_session_state::{SessionAiPaneActivity, SessionAiPaneActivityState};
 
-pub const AI_ACTIVITY_ALERT_TAB_MARKER: &str = "[!] ";
-pub const AI_ACTIVITY_BUSY_TAB_MARKER: &str = "[...] ";
+pub const AI_ACTIVITY_ALERT_TAB_MARKER: &str = "✓";
+pub const AI_ACTIVITY_BUSY_TAB_MARKER: &str = "·";
 pub const AI_ACTIVITY_TAB_DECORATION_MIN_WRITE_INTERVAL: Duration = Duration::from_secs(1);
 pub const TERMINAL_TITLE_ACTIVITY_PROVIDER: &str = "terminal-title";
 const ACTIVITY_TITLE_SPINNER_CHARS: &str = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+const LEGACY_AI_ACTIVITY_ALERT_TAB_MARKER: &str = "[!] ";
+const LEGACY_AI_ACTIVITY_BUSY_TAB_MARKER: &str = "[...] ";
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct AiPaneActivityRegistration {
@@ -49,7 +51,7 @@ pub enum AiActivityTabDecorationState {
 }
 
 impl AiActivityTabDecorationState {
-    fn marker(self) -> Option<&'static str> {
+    fn marker_token(self) -> Option<&'static str> {
         match self {
             Self::Idle => None,
             Self::Busy => Some(AI_ACTIVITY_BUSY_TAB_MARKER),
@@ -109,8 +111,8 @@ pub fn decorate_ai_activity_tab_name(
     tab_name: &str,
     state: AiActivityTabDecorationState,
 ) -> String {
-    match state.marker() {
-        Some(marker) => format!("{marker}{tab_name}"),
+    match state.marker_token() {
+        Some(marker) => format!("{tab_name} {marker}"),
         None => tab_name.to_string(),
     }
 }
@@ -130,7 +132,15 @@ pub fn terminal_activity_title_base(title: &str) -> Option<&str> {
 fn ai_activity_marker_base(tab_name: &str) -> Option<&str> {
     [AI_ACTIVITY_BUSY_TAB_MARKER, AI_ACTIVITY_ALERT_TAB_MARKER]
         .iter()
-        .find_map(|marker| tab_name.strip_prefix(marker))
+        .find_map(|marker| tab_name.strip_suffix(marker)?.strip_suffix(' '))
+        .or_else(|| {
+            [
+                LEGACY_AI_ACTIVITY_BUSY_TAB_MARKER,
+                LEGACY_AI_ACTIVITY_ALERT_TAB_MARKER,
+            ]
+            .iter()
+            .find_map(|marker| tab_name.strip_prefix(marker))
+        })
         .map(str::trim)
         .filter(|base_name| !base_name.is_empty())
 }
@@ -219,6 +229,10 @@ mod tests {
             activity: activity.into(),
             state: None,
         }
+    }
+
+    fn compact_activity_marker_has_stable_shape(marker: &str) -> bool {
+        marker.chars().count() == 1 && marker != "."
     }
 
     // Defends: legacy activity tokens map into the normalized status-bus state taxonomy.
@@ -354,20 +368,20 @@ mod tests {
         assert_eq!(
             busy,
             AiActivityTabNamePlan {
-                display_name: "[...] yazelix-terminal".into(),
+                display_name: "yazelix-terminal ·".into(),
                 base_name: Some("yazelix-terminal".into()),
             }
         );
 
         let still_busy = plan_ai_activity_tab_name(
-            "[...] yazelix-terminal",
+            "yazelix-terminal ·",
             Some("yazelix-terminal"),
             AiActivityTabDecorationState::Busy,
         );
         assert_eq!(still_busy, busy);
 
         let inactive = plan_ai_activity_tab_name(
-            "[...] yazelix-terminal",
+            "yazelix-terminal ·",
             Some("yazelix-terminal"),
             AiActivityTabDecorationState::Idle,
         );
@@ -380,14 +394,14 @@ mod tests {
         );
 
         let alert = plan_ai_activity_tab_name(
-            "[...] yazelix-terminal",
+            "yazelix-terminal ·",
             Some("yazelix-terminal"),
             AiActivityTabDecorationState::Alert,
         );
         assert_eq!(
             alert,
             AiActivityTabNamePlan {
-                display_name: "[!] yazelix-terminal".into(),
+                display_name: "yazelix-terminal ✓".into(),
                 base_name: Some("yazelix-terminal".into()),
             }
         );
@@ -400,33 +414,33 @@ mod tests {
         assert_eq!(
             renamed_while_busy,
             AiActivityTabNamePlan {
-                display_name: "[...] scratch".into(),
+                display_name: "scratch ·".into(),
                 base_name: Some("scratch".into()),
             }
         );
 
         let inactive_user_marker =
-            plan_ai_activity_tab_name("[...] scratch", None, AiActivityTabDecorationState::Idle);
+            plan_ai_activity_tab_name("scratch ·", None, AiActivityTabDecorationState::Idle);
         assert_eq!(
             inactive_user_marker,
             AiActivityTabNamePlan {
-                display_name: "[...] scratch".into(),
+                display_name: "scratch ·".into(),
                 base_name: None,
             }
         );
 
         let busy_user_marker =
-            plan_ai_activity_tab_name("[...] scratch", None, AiActivityTabDecorationState::Busy);
+            plan_ai_activity_tab_name("scratch ·", None, AiActivityTabDecorationState::Busy);
         assert_eq!(
             busy_user_marker,
             AiActivityTabNamePlan {
-                display_name: "[...] scratch".into(),
+                display_name: "scratch ·".into(),
                 base_name: Some("scratch".into()),
             }
         );
 
         let restored_user_marker = plan_ai_activity_tab_name(
-            "[...] scratch",
+            "scratch ·",
             Some("scratch"),
             AiActivityTabDecorationState::Idle,
         );
@@ -437,6 +451,42 @@ mod tests {
                 base_name: None,
             }
         );
+    }
+
+    // Defends: old bracketed activity markers from a live session are treated as Yazelix-owned and rewritten to the compact vocabulary.
+    #[test]
+    fn tab_name_plan_rewrites_legacy_activity_markers() {
+        assert_eq!(
+            plan_ai_activity_tab_name(
+                "[...] project",
+                Some("project"),
+                AiActivityTabDecorationState::Busy,
+            ),
+            AiActivityTabNamePlan {
+                display_name: "project ·".into(),
+                base_name: Some("project".into()),
+            }
+        );
+        assert_eq!(
+            plan_ai_activity_tab_name(
+                "[!] project",
+                Some("project"),
+                AiActivityTabDecorationState::Idle
+            ),
+            AiActivityTabNamePlan {
+                display_name: "project".into(),
+                base_name: None,
+            }
+        );
+    }
+
+    // Defends: activity tab markers stay one-token, non-bracketed, and avoid the plain period marker.
+    #[test]
+    fn activity_tab_markers_are_compact_non_bracketed_tokens() {
+        for marker in [AI_ACTIVITY_BUSY_TAB_MARKER, AI_ACTIVITY_ALERT_TAB_MARKER] {
+            assert!(compact_activity_marker_has_stable_shape(marker));
+            assert!(!marker.contains(['[', ']']));
+        }
     }
 
     // Defends: terminal titles that already expose live activity produce a stable tab marker instead of rename churn.
@@ -450,26 +500,26 @@ mod tests {
         assert_eq!(
             active_title,
             AiActivityTabNamePlan {
-                display_name: "[...] yazelix".into(),
+                display_name: "yazelix ·".into(),
                 base_name: Some("yazelix".into()),
             }
         );
 
         let next_frame = plan_ai_activity_tab_name(
-            "[...] yazelix",
+            "yazelix ·",
             Some("yazelix"),
             AiActivityTabDecorationState::Busy,
         );
         assert_eq!(
             next_frame,
             AiActivityTabNamePlan {
-                display_name: "[...] yazelix".into(),
+                display_name: "yazelix ·".into(),
                 base_name: Some("yazelix".into()),
             }
         );
 
         let restored = plan_ai_activity_tab_name(
-            "[...] yazelix",
+            "yazelix ·",
             Some("yazelix"),
             AiActivityTabDecorationState::Idle,
         );
@@ -486,13 +536,13 @@ mod tests {
         assert_eq!(
             unrelated_title,
             AiActivityTabNamePlan {
-                display_name: "[...] project".into(),
+                display_name: "project ·".into(),
                 base_name: Some("project".into()),
             }
         );
 
         let restored_project = plan_ai_activity_tab_name(
-            "[...] project",
+            "project ·",
             Some("project"),
             AiActivityTabDecorationState::Idle,
         );
@@ -509,7 +559,7 @@ mod tests {
         assert_eq!(
             old_spinner_tab,
             AiActivityTabNamePlan {
-                display_name: "[...] yazelix".into(),
+                display_name: "yazelix ·".into(),
                 base_name: Some("yazelix".into()),
             }
         );
