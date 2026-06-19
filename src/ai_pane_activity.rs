@@ -1,5 +1,5 @@
-use std::collections::{BTreeMap, HashSet};
-use std::time::{Duration, Instant};
+use std::collections::HashSet;
+use std::time::Instant;
 
 use serde::Deserialize;
 use yazelix_zellij_pane_orchestrator::active_tab_session_state::SessionAiPaneActivity;
@@ -35,8 +35,6 @@ struct TerminalTitleActivitySnapshotObservation {
     is_focused: bool,
 }
 
-const TERMINAL_TITLE_ACTIVITY_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
-
 impl State {
     pub(crate) fn reconcile_ai_pane_activity_tabs(&mut self, tabs: &[TabInfo]) {
         let current_tab_ids = tabs.iter().map(|tab| tab.tab_id).collect::<HashSet<_>>();
@@ -46,7 +44,6 @@ impl State {
             .retain(|tab_id, _| current_tab_ids.contains(tab_id));
         self.reconcile_terminal_title_ai_activity();
         self.sync_ai_activity_tab_decorations_for_tabs(tabs);
-        self.schedule_terminal_title_activity_refresh_if_needed();
     }
 
     pub(crate) fn reconcile_ai_pane_activity_panes(&mut self) {
@@ -75,7 +72,6 @@ impl State {
             });
         self.reconcile_terminal_title_ai_activity();
         self.sync_ai_activity_tab_decorations_for_known_tabs();
-        self.schedule_terminal_title_activity_refresh_if_needed();
     }
 
     pub(crate) fn register_ai_pane_activity(&mut self, pipe_message: &PipeMessage) {
@@ -193,7 +189,6 @@ impl State {
         self.retain_nonempty_ai_activity_tabs();
         self.sync_ai_activity_tab_decorations_for_known_tabs();
         self.refresh_status_bar_cache();
-        self.schedule_terminal_title_activity_refresh_if_needed();
         self.respond(pipe_message, RESULT_OK);
     }
 
@@ -301,9 +296,9 @@ impl State {
         pane_id: PaneId,
         title: String,
         is_focused: bool,
-    ) {
+    ) -> bool {
         let Some(pane_id) = pane_id_to_string(Some(pane_id)) else {
-            return;
+            return false;
         };
         let previous = self.ai_pane_activity_by_tab.get(&tab_id).and_then(|facts| {
             facts
@@ -316,8 +311,7 @@ impl State {
         let is_active_tab_focus = is_focused && self.tab_identity.active_tab_id() == Some(tab_id);
         let Some(state) = terminal_title_activity_state(previous, &title, is_active_tab_focus)
         else {
-            self.remove_terminal_title_activity_fact(tab_id, &pane_id);
-            return;
+            return self.remove_terminal_title_activity_fact(tab_id, &pane_id);
         };
 
         let tab_position = self
@@ -333,6 +327,7 @@ impl State {
                 state,
             ),
         );
+        previous != Some(state)
     }
 
     pub(crate) fn handle_terminal_title_activity_pane_closed(&mut self, pane_id: PaneId) {
@@ -391,62 +386,6 @@ impl State {
                     || observed_terminal_panes.contains(&(*tab_id, fact.pane_id.clone()))
             });
         }
-    }
-
-    fn terminal_title_activity_refresh_needed(&self) -> bool {
-        self.ai_pane_activity_by_tab.values().any(|facts| {
-            facts.iter().any(|fact| {
-                fact.provider == TERMINAL_TITLE_ACTIVITY_PROVIDER
-                    && matches!(
-                        fact.state,
-                        SessionAiPaneActivityState::Active | SessionAiPaneActivityState::Thinking
-                    )
-            })
-        })
-    }
-
-    fn schedule_terminal_title_activity_refresh_if_needed(&mut self) {
-        if !self.permissions_granted || !self.terminal_title_activity_refresh_needed() {
-            self.terminal_title_activity_refresh_next_flush = None;
-            return;
-        }
-
-        if self.terminal_title_activity_refresh_next_flush.is_none() {
-            self.terminal_title_activity_refresh_next_flush =
-                Some(Instant::now() + TERMINAL_TITLE_ACTIVITY_REFRESH_INTERVAL);
-            self.arm_next_timer();
-        }
-    }
-
-    pub(crate) fn handle_terminal_title_activity_refresh_timer(&mut self) {
-        let Some(deadline) = self.terminal_title_activity_refresh_next_flush else {
-            return;
-        };
-        if Instant::now() < deadline {
-            return;
-        }
-
-        self.terminal_title_activity_refresh_next_flush = None;
-        if !self.permissions_granted || !self.terminal_title_activity_refresh_needed() {
-            return;
-        }
-
-        if self.run_terminal_title_activity_refresh_command() {
-            self.schedule_terminal_title_activity_refresh_if_needed();
-        }
-    }
-
-    fn run_terminal_title_activity_refresh_command(&mut self) -> bool {
-        let Some(runtime) = self.status_bar_runtime() else {
-            return false;
-        };
-        let command = [
-            runtime.yzx_control_path.as_str(),
-            "zellij",
-            "refresh-terminal-title-activity",
-        ];
-        run_command_with_env_variables_and_cwd(&command, runtime.env, runtime.cwd, BTreeMap::new());
-        true
     }
 
     fn find_tab_id_for_terminal_pane_id(&self, pane_id: &str) -> Option<usize> {
