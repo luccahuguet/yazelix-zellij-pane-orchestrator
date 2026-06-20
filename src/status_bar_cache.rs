@@ -122,20 +122,40 @@ impl State {
     }
 
     pub(crate) fn schedule_initial_status_bar_claude_usage_refresh(&mut self) {
+        if !self.status_usage_provider_config.claude_usage {
+            self.status_bar_claude_usage_next_refresh = None;
+            return;
+        }
+
         self.schedule_status_bar_claude_usage_refresh_after(INITIAL_CLAUDE_USAGE_REFRESH_DELAY);
     }
 
     pub(crate) fn schedule_initial_status_bar_codex_usage_refresh(&mut self) {
+        if !self.status_usage_provider_config.codex_usage {
+            self.status_bar_codex_usage_next_refresh = None;
+            return;
+        }
+
         self.schedule_status_bar_codex_usage_refresh_after(INITIAL_CODEX_USAGE_REFRESH_DELAY);
     }
 
     pub(crate) fn schedule_initial_status_bar_opencode_go_usage_refresh(&mut self) {
+        if !self.status_usage_provider_config.opencode_go_usage {
+            self.status_bar_opencode_go_usage_next_refresh = None;
+            return;
+        }
+
         self.schedule_status_bar_opencode_go_usage_refresh_after(
             INITIAL_OPENCODE_GO_USAGE_REFRESH_DELAY,
         );
     }
 
     pub(crate) fn handle_status_bar_claude_usage_timer(&mut self) {
+        if !self.status_usage_provider_config.claude_usage {
+            self.status_bar_claude_usage_next_refresh = None;
+            return;
+        }
+
         let now = Instant::now();
         let Some(next_refresh) = self.status_bar_claude_usage_next_refresh else {
             self.schedule_initial_status_bar_claude_usage_refresh();
@@ -155,6 +175,11 @@ impl State {
     }
 
     pub(crate) fn handle_status_bar_codex_usage_timer(&mut self) {
+        if !self.status_usage_provider_config.codex_usage {
+            self.status_bar_codex_usage_next_refresh = None;
+            return;
+        }
+
         let now = Instant::now();
         let Some(next_refresh) = self.status_bar_codex_usage_next_refresh else {
             self.schedule_initial_status_bar_codex_usage_refresh();
@@ -174,6 +199,11 @@ impl State {
     }
 
     pub(crate) fn handle_status_bar_opencode_go_usage_timer(&mut self) {
+        if !self.status_usage_provider_config.opencode_go_usage {
+            self.status_bar_opencode_go_usage_next_refresh = None;
+            return;
+        }
+
         let now = Instant::now();
         let Some(next_refresh) = self.status_bar_opencode_go_usage_next_refresh else {
             self.schedule_initial_status_bar_opencode_go_usage_refresh();

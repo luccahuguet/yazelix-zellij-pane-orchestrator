@@ -24,6 +24,7 @@ use yazelix_zellij_pane_orchestrator::layout_state_contract::{
 use yazelix_zellij_pane_orchestrator::right_sidebar_command_contract::RightSidebarCommandConfig;
 use yazelix_zellij_pane_orchestrator::screen_saver_contract::ScreenSaverConfig;
 use yazelix_zellij_pane_orchestrator::status_bar_cache_contract::StatusBarCacheRuntime;
+use yazelix_zellij_pane_orchestrator::status_usage_provider_contract::StatusUsageProviderConfig;
 use yazelix_zellij_pane_orchestrator::tab_identity_contract::{
     retain_current_tab_state, TabIdentityState,
 };
@@ -79,6 +80,7 @@ struct State {
     status_bar_claude_usage_next_refresh: Option<Instant>,
     status_bar_codex_usage_next_refresh: Option<Instant>,
     status_bar_opencode_go_usage_next_refresh: Option<Instant>,
+    status_usage_provider_config: StatusUsageProviderConfig,
     orchestrator_heartbeat: heartbeat::OrchestratorHeartbeat,
     timer_armed_for: Option<Instant>,
     runtime_config_generation: String,
@@ -111,6 +113,8 @@ impl ZellijPlugin for State {
         self.screen_saver_config = ScreenSaverConfig::from_plugin_configuration(&configuration);
         self.right_sidebar_command =
             RightSidebarCommandConfig::from_plugin_configuration(&configuration);
+        self.status_usage_provider_config =
+            StatusUsageProviderConfig::from_plugin_configuration(&configuration);
         self.runtime_config_generation = configuration
             .get("runtime_config_generation")
             .map(|value| value.trim().to_string())
