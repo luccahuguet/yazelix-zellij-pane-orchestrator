@@ -1,9 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::active_tab_session_state::SessionAiPaneActivity;
-use crate::ai_pane_activity_contract::{
-    ai_activity_tab_decoration_state, AiActivityTabDecorationState,
-};
+use crate::ai_pane_activity_contract::{ai_activity_tab_state, AiActivityTabState};
 
 pub const ALL_TAB_ACTIVITY_SNAPSHOT_SCHEMA_VERSION: i32 = 1;
 
@@ -25,12 +23,12 @@ impl TabActivitySnapshotState {
     }
 }
 
-impl From<AiActivityTabDecorationState> for TabActivitySnapshotState {
-    fn from(state: AiActivityTabDecorationState) -> Self {
+impl From<AiActivityTabState> for TabActivitySnapshotState {
+    fn from(state: AiActivityTabState) -> Self {
         match state {
-            AiActivityTabDecorationState::Idle => Self::Idle,
-            AiActivityTabDecorationState::Busy => Self::Busy,
-            AiActivityTabDecorationState::Alert => Self::Alert,
+            AiActivityTabState::Idle => Self::Idle,
+            AiActivityTabState::Busy => Self::Busy,
+            AiActivityTabState::Alert => Self::Alert,
         }
     }
 }
@@ -89,9 +87,8 @@ pub fn build_all_tab_activity_snapshot_v1(
                         activity
                     })
                     .collect::<Vec<_>>();
-                let activity_state = TabActivitySnapshotState::from(
-                    ai_activity_tab_decoration_state(activity.as_slice()),
-                );
+                let activity_state =
+                    TabActivitySnapshotState::from(ai_activity_tab_state(activity.as_slice()));
 
                 TabActivitySnapshotTab {
                     tab_id: tab.tab_id,

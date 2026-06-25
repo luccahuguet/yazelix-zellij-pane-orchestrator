@@ -4,6 +4,9 @@ use std::time::{Duration, Instant};
 use yazelix_zellij_pane_orchestrator::status_bar_cache_contract::{
     resolve_status_bar_cache_runtime, StatusBarCacheRuntime,
 };
+use yazelix_zellij_pane_orchestrator::status_bar_tab_activity_pipe_contract::{
+    tab_activity_pipe_protocol_payload, ZJSTATUS_TAB_ACTIVITY_PIPE_MESSAGE,
+};
 use yazelix_zellij_pane_orchestrator::status_bar_workspace_pipe_contract::{
     workspace_pipe_protocol_payload, ZJSTATUS_WORKSPACE_PIPE_MESSAGE,
 };
@@ -48,6 +51,7 @@ impl State {
         let Ok(tab_activity_payload) = serde_json::to_string(&tab_activity_snapshot) else {
             return;
         };
+        self.publish_tab_activity_status_pipe(&tab_activity_payload);
         let cache_key = format!("{status_payload}\n{tab_activity_payload}");
         if self.status_bar_cache_last_payload.as_deref() == Some(cache_key.as_str()) {
             return;
@@ -99,6 +103,35 @@ impl State {
         );
         self.workspace_status_pipe_payload_by_plugin
             .insert(zjstatus_plugin_id, payload);
+    }
+
+    fn publish_tab_activity_status_pipe(&mut self, tab_activity_payload: &str) {
+        let payload = tab_activity_pipe_protocol_payload(tab_activity_payload);
+        let plugin_ids = self
+            .tab_pane_caches
+            .zjstatus_plugin_id_by_tab
+            .values()
+            .copied()
+            .collect::<Vec<_>>();
+
+        for plugin_id in plugin_ids {
+            if self
+                .tab_activity_pipe_payload_by_plugin
+                .get(&plugin_id)
+                .map(String::as_str)
+                == Some(payload.as_str())
+            {
+                continue;
+            }
+
+            pipe_message_to_plugin(
+                MessageToPlugin::new(ZJSTATUS_TAB_ACTIVITY_PIPE_MESSAGE)
+                    .with_destination_plugin_id(plugin_id)
+                    .with_payload(payload.clone()),
+            );
+            self.tab_activity_pipe_payload_by_plugin
+                .insert(plugin_id, payload.clone());
+        }
     }
 
     fn workspace_status_pipe_payload(&self, active_tab_id: usize) -> String {

@@ -1,15 +1,11 @@
 use std::collections::HashSet;
-use std::time::Instant;
 
 use serde::Deserialize;
 use yazelix_zellij_pane_orchestrator::active_tab_session_state::SessionAiPaneActivity;
 use yazelix_zellij_pane_orchestrator::active_tab_session_state::SessionAiPaneActivityState;
 use yazelix_zellij_pane_orchestrator::ai_pane_activity_contract::{
-    ai_activity_tab_decoration_state, ai_activity_tab_decoration_write_deadline,
-    normalized_ai_activity_state, plan_ai_activity_tab_name, remove_ai_pane_activity_fact,
-    terminal_title_activity_state, upsert_ai_pane_activity_fact, AiActivityTabNamePlan,
-    AiPaneActivityRegistration, AI_ACTIVITY_TAB_DECORATION_MIN_WRITE_INTERVAL,
-    TERMINAL_TITLE_ACTIVITY_PROVIDER,
+    normalized_ai_activity_state, remove_ai_pane_activity_fact, terminal_title_activity_state,
+    upsert_ai_pane_activity_fact, AiPaneActivityRegistration, TERMINAL_TITLE_ACTIVITY_PROVIDER,
 };
 use yazelix_zellij_pane_orchestrator::tab_activity_snapshot_contract::{
     build_all_tab_activity_snapshot_v1, AllTabActivitySnapshotV1, TabActivityReadState,
@@ -19,20 +15,12 @@ use zellij_tile::prelude::*;
 use crate::panes::pane_id_to_string;
 use crate::{State, RESULT_DENIED, RESULT_INVALID_PAYLOAD, RESULT_MISSING, RESULT_OK};
 
-struct AiActivityTabDecorationPlan {
-    tab_id: usize,
-    current_name: String,
-    name_plan: AiActivityTabNamePlan,
-}
-
 #[derive(Deserialize)]
 struct TerminalTitleActivitySnapshotObservation {
     tab_id: usize,
     pane_id: u32,
     #[serde(default)]
     title: String,
-    #[serde(default)]
-    is_focused: bool,
 }
 
 impl State {
@@ -40,10 +28,7 @@ impl State {
         let current_tab_ids = tabs.iter().map(|tab| tab.tab_id).collect::<HashSet<_>>();
         self.ai_pane_activity_by_tab
             .retain(|tab_id, _| current_tab_ids.contains(tab_id));
-        self.ai_activity_tab_base_name_by_tab
-            .retain(|tab_id, _| current_tab_ids.contains(tab_id));
         self.reconcile_terminal_title_ai_activity();
-        self.sync_ai_activity_tab_decorations_for_tabs(tabs);
     }
 
     pub(crate) fn reconcile_ai_pane_activity_panes(&mut self) {
@@ -71,7 +56,6 @@ impl State {
                 true
             });
         self.reconcile_terminal_title_ai_activity();
-        self.sync_ai_activity_tab_decorations_for_known_tabs();
     }
 
     pub(crate) fn register_ai_pane_activity(&mut self, pipe_message: &PipeMessage) {
@@ -136,7 +120,6 @@ impl State {
             self.ai_pane_activity_by_tab.entry(tab_id).or_default(),
             fact,
         );
-        self.sync_ai_activity_tab_decoration_for_tab(tab_id);
         self.refresh_status_bar_cache();
         self.respond(pipe_message, RESULT_OK);
     }
@@ -181,13 +164,11 @@ impl State {
                 observation.tab_id,
                 pane_id,
                 observation.title,
-                observation.is_focused,
             );
         }
 
         self.retain_terminal_title_activity_snapshot_facts(&observed_terminal_panes);
         self.retain_nonempty_ai_activity_tabs();
-        self.sync_ai_activity_tab_decorations_for_known_tabs();
         self.refresh_status_bar_cache();
         self.respond(pipe_message, RESULT_OK);
     }
@@ -241,7 +222,7 @@ impl State {
                     tab_id: *tab_id,
                     tab_position: *tab_position,
                     current_name,
-                    base_name: self.ai_activity_tab_base_name_by_tab.get(tab_id).cloned(),
+                    base_name: None,
                     active: self.tab_identity.active_tab_id() == Some(*tab_id),
                     is_fullscreen_active: self
                         .tab_fullscreen_active_by_tab
@@ -279,12 +260,12 @@ impl State {
             .flat_map(|(tab_id, panes)| {
                 panes
                     .iter()
-                    .map(move |pane| (*tab_id, pane.pane_id, pane.title.clone(), pane.is_focused))
+                    .map(move |pane| (*tab_id, pane.pane_id, pane.title.clone()))
             })
             .collect::<Vec<_>>();
 
-        for (tab_id, pane_id, title, is_focused) in observations {
-            self.reconcile_terminal_title_activity_observation(tab_id, pane_id, title, is_focused);
+        for (tab_id, pane_id, title) in observations {
+            self.reconcile_terminal_title_activity_observation(tab_id, pane_id, title);
         }
 
         self.retain_nonempty_ai_activity_tabs();
@@ -295,7 +276,6 @@ impl State {
         tab_id: usize,
         pane_id: PaneId,
         title: String,
-        is_focused: bool,
     ) -> bool {
         let Some(pane_id) = pane_id_to_string(Some(pane_id)) else {
             return false;
@@ -308,9 +288,7 @@ impl State {
                 })
                 .map(|fact| fact.state)
         });
-        let is_active_tab_focus = is_focused && self.tab_identity.active_tab_id() == Some(tab_id);
-        let Some(state) = terminal_title_activity_state(previous, &title, is_active_tab_focus)
-        else {
+        let Some(state) = terminal_title_activity_state(&title) else {
             return self.remove_terminal_title_activity_fact(tab_id, &pane_id);
         };
 
@@ -332,13 +310,13 @@ impl State {
 
     pub(crate) fn handle_terminal_title_activity_pane_closed(&mut self, pane_id: PaneId) {
         if self.remove_terminal_title_activity_fact_for_pane(pane_id) {
-            self.sync_ai_activity_tab_decorations_for_known_tabs();
+            self.refresh_status_bar_cache();
         }
     }
 
     pub(crate) fn handle_terminal_title_activity_command_pane_exited(&mut self, terminal_id: u32) {
         if self.remove_terminal_title_activity_fact_for_pane(PaneId::Terminal(terminal_id)) {
-            self.sync_ai_activity_tab_decorations_for_known_tabs();
+            self.refresh_status_bar_cache();
         }
     }
 
@@ -399,145 +377,5 @@ impl State {
                     .any(|candidate| candidate == pane_id)
             })
             .map(|(tab_id, _)| *tab_id)
-    }
-
-    pub(crate) fn sync_ai_activity_tab_decorations_for_tabs(&mut self, tabs: &[TabInfo]) {
-        let tab_entries = tabs
-            .iter()
-            .map(|tab| (tab.tab_id, tab.name.clone()))
-            .collect::<Vec<_>>();
-        self.sync_ai_activity_tab_decoration_entries(tab_entries);
-    }
-
-    pub(crate) fn sync_ai_activity_tab_decorations_for_known_tabs(&mut self) {
-        let tab_entries = self
-            .tab_name_by_tab_id
-            .iter()
-            .filter_map(|(tab_id, name)| {
-                self.tab_identity
-                    .position_for_tab_id(*tab_id)
-                    .map(|_| (*tab_id, name.clone()))
-            })
-            .collect::<Vec<_>>();
-        self.sync_ai_activity_tab_decoration_entries(tab_entries);
-    }
-
-    fn sync_ai_activity_tab_decoration_for_tab(&mut self, tab_id: usize) {
-        if self.tab_identity.position_for_tab_id(tab_id).is_none() {
-            return;
-        }
-        let Some(current_name) = self.tab_name_by_tab_id.get(&tab_id).cloned() else {
-            return;
-        };
-        self.sync_ai_activity_tab_decoration_entries(vec![(tab_id, current_name)]);
-    }
-
-    fn sync_ai_activity_tab_decoration_entries(&mut self, tab_entries: Vec<(usize, String)>) {
-        if !self.permissions_granted {
-            return;
-        }
-
-        let plans = tab_entries
-            .into_iter()
-            .map(|(tab_id, current_name)| {
-                self.ai_activity_tab_decoration_plan(tab_id, current_name)
-            })
-            .collect::<Vec<_>>();
-
-        let needs_native_rename = plans
-            .iter()
-            .any(|plan| plan.name_plan.display_name != plan.current_name);
-        if !needs_native_rename {
-            self.apply_ai_activity_tab_decoration_plans(plans);
-            return;
-        }
-
-        let now = Instant::now();
-        if let Some(deadline) = ai_activity_tab_decoration_write_deadline(
-            now,
-            self.ai_activity_tab_decoration_last_write,
-        ) {
-            self.schedule_ai_activity_tab_decoration_flush(deadline);
-            return;
-        }
-
-        self.ai_activity_tab_decoration_next_flush = None;
-        let issued_native_rename = self.apply_ai_activity_tab_decoration_plans(plans);
-        self.ai_activity_tab_decoration_last_write = Some(now);
-        if issued_native_rename {
-            self.schedule_ai_activity_tab_decoration_flush(
-                now + AI_ACTIVITY_TAB_DECORATION_MIN_WRITE_INTERVAL,
-            );
-        }
-    }
-
-    fn ai_activity_tab_decoration_plan(
-        &self,
-        tab_id: usize,
-        current_name: String,
-    ) -> AiActivityTabDecorationPlan {
-        let facts = self
-            .ai_pane_activity_by_tab
-            .get(&tab_id)
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
-        let state = ai_activity_tab_decoration_state(facts);
-        let previous_base_name = self
-            .ai_activity_tab_base_name_by_tab
-            .get(&tab_id)
-            .map(String::as_str);
-        let name_plan = plan_ai_activity_tab_name(&current_name, previous_base_name, state);
-
-        AiActivityTabDecorationPlan {
-            tab_id,
-            current_name,
-            name_plan,
-        }
-    }
-
-    fn apply_ai_activity_tab_decoration_plans(
-        &mut self,
-        plans: Vec<AiActivityTabDecorationPlan>,
-    ) -> bool {
-        let mut issued_native_rename = false;
-        for plan in plans {
-            if plan.name_plan.display_name != plan.current_name {
-                rename_tab_with_id(plan.tab_id as u64, &plan.name_plan.display_name);
-                issued_native_rename = true;
-            }
-            self.tab_name_by_tab_id
-                .insert(plan.tab_id, plan.name_plan.display_name.clone());
-
-            if let Some(base_name) = plan.name_plan.base_name {
-                self.ai_activity_tab_base_name_by_tab
-                    .insert(plan.tab_id, base_name);
-            } else {
-                self.ai_activity_tab_base_name_by_tab.remove(&plan.tab_id);
-            }
-        }
-        issued_native_rename
-    }
-
-    fn schedule_ai_activity_tab_decoration_flush(&mut self, deadline: Instant) {
-        if self
-            .ai_activity_tab_decoration_next_flush
-            .map(|existing| deadline < existing)
-            .unwrap_or(true)
-        {
-            self.ai_activity_tab_decoration_next_flush = Some(deadline);
-            self.arm_next_timer();
-        }
-    }
-
-    pub(crate) fn handle_ai_activity_tab_decoration_timer(&mut self) {
-        let Some(deadline) = self.ai_activity_tab_decoration_next_flush else {
-            return;
-        };
-        if Instant::now() < deadline {
-            return;
-        }
-
-        self.ai_activity_tab_decoration_next_flush = None;
-        self.sync_ai_activity_tab_decorations_for_known_tabs();
     }
 }

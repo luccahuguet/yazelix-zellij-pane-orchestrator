@@ -62,9 +62,6 @@ struct State {
     workspace_state_by_tab: HashMap<usize, WorkspaceState>,
     sidebar_yazi_state_by_tab: HashMap<usize, sidebar_yazi::SidebarYaziState>,
     ai_pane_activity_by_tab: HashMap<usize, Vec<SessionAiPaneActivity>>,
-    ai_activity_tab_base_name_by_tab: HashMap<usize, String>,
-    ai_activity_tab_decoration_last_write: Option<Instant>,
-    ai_activity_tab_decoration_next_flush: Option<Instant>,
     seen_tab_ids: HashSet<usize>,
     initial_workspace_state: Option<WorkspaceState>,
     runtime_dir: PathBuf,
@@ -77,6 +74,7 @@ struct State {
     status_bar_cache_runtime: Option<StatusBarCacheRuntime>,
     status_bar_cache_last_payload: Option<String>,
     workspace_status_pipe_payload_by_plugin: HashMap<u32, String>,
+    tab_activity_pipe_payload_by_plugin: HashMap<u32, String>,
     status_bar_claude_usage_next_refresh: Option<Instant>,
     status_bar_codex_usage_next_refresh: Option<Instant>,
     status_bar_opencode_go_usage_next_refresh: Option<Instant>,
@@ -189,16 +187,12 @@ impl ZellijPlugin for State {
             }
             Event::PermissionRequestResult(status) => {
                 self.permissions_granted = status == PermissionStatus::Granted;
-                if self.permissions_granted {
-                    self.sync_ai_activity_tab_decorations_for_known_tabs();
-                }
             }
             Event::InputReceived => self.record_screen_saver_input(),
             Event::Timer(_) => {
                 self.timer_armed_for = None;
                 self.record_orchestrator_timer();
                 self.handle_tab_local_pane_reconcile_timer();
-                self.handle_ai_activity_tab_decoration_timer();
                 self.handle_screen_saver_timer();
                 self.handle_status_bar_claude_usage_timer();
                 self.handle_status_bar_codex_usage_timer();
@@ -350,6 +344,8 @@ impl State {
         );
         self.workspace_status_pipe_payload_by_plugin
             .retain(|plugin_id, _| self.tab_pane_caches.has_zjstatus_plugin_id(*plugin_id));
+        self.tab_activity_pipe_payload_by_plugin
+            .retain(|plugin_id, _| self.tab_pane_caches.has_zjstatus_plugin_id(*plugin_id));
         self.reconcile_sidebar_yazi_state();
         self.reconcile_ai_pane_activity_panes();
     }
@@ -414,7 +410,6 @@ impl State {
         retain_current_tab_state(&mut self.tab_name_by_tab_id, &current_tab_ids);
         retain_current_tab_state(&mut self.tab_fullscreen_active_by_tab, &current_tab_ids);
         retain_current_tab_state(&mut self.tab_sync_panes_active_by_tab, &current_tab_ids);
-        retain_current_tab_state(&mut self.ai_activity_tab_base_name_by_tab, &current_tab_ids);
     }
 
     pub(crate) fn ensure_action_ready(&self, pipe_message: &PipeMessage) -> Option<usize> {
@@ -449,7 +444,6 @@ impl State {
                 self.status_bar_codex_usage_next_refresh,
                 self.status_bar_opencode_go_usage_next_refresh,
                 self.tab_local_pane_reconcile_next_flush,
-                self.ai_activity_tab_decoration_next_flush,
                 self.orchestrator_heartbeat.next_flush,
             ],
             self.timer_armed_for,
