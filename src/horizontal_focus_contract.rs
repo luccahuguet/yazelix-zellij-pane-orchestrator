@@ -31,6 +31,10 @@ pub fn horizontal_role_for_pane<Id: PartialEq>(
     }
 }
 
+pub fn is_visible_popup_pane(pane_title: &str, is_floating: bool, is_suppressed: bool) -> bool {
+    is_floating && !is_suppressed && pane_title.trim().ends_with("_popup")
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HorizontalPaneSnapshot {
     pub role: HorizontalPaneRole,
@@ -54,9 +58,17 @@ pub enum HorizontalFocusPlan {
 pub fn resolve_horizontal_focus(
     panes: &[HorizontalPaneSnapshot],
     direction: HorizontalDirection,
+    visible_popup_is_open: bool,
     sidebar_is_closed: bool,
     agent_is_closed: bool,
 ) -> HorizontalFocusPlan {
+    if visible_popup_is_open {
+        return match direction {
+            HorizontalDirection::Left => HorizontalFocusPlan::PreviousTab,
+            HorizontalDirection::Right => HorizontalFocusPlan::NextTab,
+        };
+    }
+
     let Some((focused_index, focused_pane)) = panes
         .iter()
         .enumerate()
@@ -125,38 +137,41 @@ pub fn resolve_horizontal_focus(
 #[cfg(test)]
 mod tests {
     use super::{
-        horizontal_role_for_pane, resolve_horizontal_focus, HorizontalDirection,
-        HorizontalFocusPlan, HorizontalPaneRole, HorizontalPaneSnapshot,
+        horizontal_role_for_pane, is_visible_popup_pane, resolve_horizontal_focus,
+        HorizontalDirection, HorizontalFocusPlan, HorizontalPaneRole, HorizontalPaneSnapshot,
     };
+    use HorizontalPaneRole::{Agent, Other, Sidebar};
+
+    fn pane(
+        role: HorizontalPaneRole,
+        is_focused: bool,
+        pane_x: usize,
+        pane_y: usize,
+        pane_columns: usize,
+        pane_rows: usize,
+    ) -> HorizontalPaneSnapshot {
+        HorizontalPaneSnapshot {
+            role,
+            is_plugin: false,
+            exited: false,
+            is_focused,
+            pane_x,
+            pane_y,
+            pane_columns,
+            pane_rows,
+        }
+    }
 
     // Defends: leftward focus skips a closed sidebar instead of treating it as a real target.
     #[test]
     fn closed_sidebar_is_skipped_when_walking_left() {
         let panes = [
-            HorizontalPaneSnapshot {
-                role: HorizontalPaneRole::Sidebar,
-                is_plugin: false,
-                exited: false,
-                is_focused: false,
-                pane_x: 0,
-                pane_y: 0,
-                pane_columns: 1,
-                pane_rows: 40,
-            },
-            HorizontalPaneSnapshot {
-                role: HorizontalPaneRole::Other,
-                is_plugin: false,
-                exited: false,
-                is_focused: true,
-                pane_x: 1,
-                pane_y: 0,
-                pane_columns: 80,
-                pane_rows: 40,
-            },
+            pane(Sidebar, false, 0, 0, 1, 40),
+            pane(Other, true, 1, 0, 80, 40),
         ];
 
         assert_eq!(
-            resolve_horizontal_focus(&panes, HorizontalDirection::Left, true, false),
+            resolve_horizontal_focus(&panes, HorizontalDirection::Left, false, true, false),
             HorizontalFocusPlan::PreviousTab
         );
     }
@@ -165,30 +180,12 @@ mod tests {
     #[test]
     fn open_sidebar_is_still_a_valid_left_target() {
         let panes = [
-            HorizontalPaneSnapshot {
-                role: HorizontalPaneRole::Sidebar,
-                is_plugin: false,
-                exited: false,
-                is_focused: false,
-                pane_x: 0,
-                pane_y: 0,
-                pane_columns: 24,
-                pane_rows: 40,
-            },
-            HorizontalPaneSnapshot {
-                role: HorizontalPaneRole::Other,
-                is_plugin: false,
-                exited: false,
-                is_focused: true,
-                pane_x: 24,
-                pane_y: 0,
-                pane_columns: 80,
-                pane_rows: 40,
-            },
+            pane(Sidebar, false, 0, 0, 24, 40),
+            pane(Other, true, 24, 0, 80, 40),
         ];
 
         assert_eq!(
-            resolve_horizontal_focus(&panes, HorizontalDirection::Left, false, false),
+            resolve_horizontal_focus(&panes, HorizontalDirection::Left, false, false, false),
             HorizontalFocusPlan::FocusPane(0)
         );
     }
@@ -197,30 +194,12 @@ mod tests {
     #[test]
     fn closed_agent_is_skipped_when_walking_right() {
         let panes = [
-            HorizontalPaneSnapshot {
-                role: HorizontalPaneRole::Other,
-                is_plugin: false,
-                exited: false,
-                is_focused: true,
-                pane_x: 0,
-                pane_y: 0,
-                pane_columns: 80,
-                pane_rows: 40,
-            },
-            HorizontalPaneSnapshot {
-                role: HorizontalPaneRole::Agent,
-                is_plugin: false,
-                exited: false,
-                is_focused: false,
-                pane_x: 80,
-                pane_y: 0,
-                pane_columns: 1,
-                pane_rows: 40,
-            },
+            pane(Other, true, 0, 0, 80, 40),
+            pane(Agent, false, 80, 0, 1, 40),
         ];
 
         assert_eq!(
-            resolve_horizontal_focus(&panes, HorizontalDirection::Right, false, true),
+            resolve_horizontal_focus(&panes, HorizontalDirection::Right, false, false, true),
             HorizontalFocusPlan::NextTab
         );
     }
@@ -229,40 +208,13 @@ mod tests {
     #[test]
     fn nearest_visible_left_pane_wins_over_hidden_sidebar() {
         let panes = [
-            HorizontalPaneSnapshot {
-                role: HorizontalPaneRole::Sidebar,
-                is_plugin: false,
-                exited: false,
-                is_focused: false,
-                pane_x: 0,
-                pane_y: 0,
-                pane_columns: 1,
-                pane_rows: 40,
-            },
-            HorizontalPaneSnapshot {
-                role: HorizontalPaneRole::Other,
-                is_plugin: false,
-                exited: false,
-                is_focused: false,
-                pane_x: 1,
-                pane_y: 0,
-                pane_columns: 60,
-                pane_rows: 40,
-            },
-            HorizontalPaneSnapshot {
-                role: HorizontalPaneRole::Other,
-                is_plugin: false,
-                exited: false,
-                is_focused: true,
-                pane_x: 61,
-                pane_y: 0,
-                pane_columns: 40,
-                pane_rows: 40,
-            },
+            pane(Sidebar, false, 0, 0, 1, 40),
+            pane(Other, false, 1, 0, 60, 40),
+            pane(Other, true, 61, 0, 40, 40),
         ];
 
         assert_eq!(
-            resolve_horizontal_focus(&panes, HorizontalDirection::Left, true, false),
+            resolve_horizontal_focus(&panes, HorizontalDirection::Left, false, true, false),
             HorizontalFocusPlan::FocusPane(1)
         );
     }
@@ -271,32 +223,44 @@ mod tests {
     #[test]
     fn panes_without_horizontal_overlap_do_not_count_as_left_or_right_targets() {
         let panes = [
-            HorizontalPaneSnapshot {
-                role: HorizontalPaneRole::Other,
-                is_plugin: false,
-                exited: false,
-                is_focused: true,
-                pane_x: 1,
-                pane_y: 0,
-                pane_columns: 80,
-                pane_rows: 20,
-            },
-            HorizontalPaneSnapshot {
-                role: HorizontalPaneRole::Other,
-                is_plugin: false,
-                exited: false,
-                is_focused: false,
-                pane_x: 1,
-                pane_y: 20,
-                pane_columns: 80,
-                pane_rows: 20,
-            },
+            pane(Other, true, 1, 0, 80, 20),
+            pane(Other, false, 1, 20, 80, 20),
         ];
 
         assert_eq!(
-            resolve_horizontal_focus(&panes, HorizontalDirection::Right, true, false),
+            resolve_horizontal_focus(&panes, HorizontalDirection::Right, false, true, false),
             HorizontalFocusPlan::NextTab
         );
+    }
+
+    // Regression: a visible managed popup owns horizontal navigation, so walking left or
+    // right changes tabs instead of leaking focus to the sidebar or pane stack behind it.
+    #[test]
+    fn visible_popup_owns_horizontal_navigation() {
+        let panes = [
+            pane(Sidebar, false, 0, 0, 24, 40),
+            pane(Other, false, 24, 0, 80, 40),
+            pane(Other, true, 4, 2, 90, 36),
+        ];
+
+        assert_eq!(
+            resolve_horizontal_focus(&panes, HorizontalDirection::Left, true, false, false),
+            HorizontalFocusPlan::PreviousTab
+        );
+        assert_eq!(
+            resolve_horizontal_focus(&panes, HorizontalDirection::Right, true, false, false),
+            HorizontalFocusPlan::NextTab
+        );
+    }
+
+    // Defends: only visible floating popup panes own horizontal tab navigation.
+    #[test]
+    fn visible_popup_identity_requires_floating_unsuppressed_popup_title() {
+        assert!(is_visible_popup_pane("config_popup", true, false));
+        assert!(is_visible_popup_pane(" agent_popup ", true, false));
+        assert!(!is_visible_popup_pane("config_popup", true, true));
+        assert!(!is_visible_popup_pane("config_popup", false, false));
+        assert!(!is_visible_popup_pane("editor", true, false));
     }
 
     // Regression: activity-driven terminal titles must not make a managed agent pane look like
@@ -305,7 +269,7 @@ mod tests {
     fn managed_agent_identity_wins_over_activity_mutated_title() {
         assert_eq!(
             horizontal_role_for_pane(&7, "codex ·", None, Some(&7)),
-            HorizontalPaneRole::Agent
+            Agent
         );
     }
 }

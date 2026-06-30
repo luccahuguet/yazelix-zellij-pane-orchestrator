@@ -7,8 +7,8 @@ use yazelix_zellij_pane_orchestrator::active_tab_session_state::{
     SessionWorkspace,
 };
 use yazelix_zellij_pane_orchestrator::horizontal_focus_contract::{
-    horizontal_role_for_pane, resolve_horizontal_focus, HorizontalDirection, HorizontalFocusPlan,
-    HorizontalPaneSnapshot,
+    horizontal_role_for_pane, is_visible_popup_pane, resolve_horizontal_focus, HorizontalDirection,
+    HorizontalFocusPlan, HorizontalPaneSnapshot,
 };
 use yazelix_zellij_pane_orchestrator::pane_contract::{
     resolve_focus_context, select_managed_pane_index, FocusContextPolicy, PaneSnapshot,
@@ -47,6 +47,7 @@ pub(crate) struct TerminalPaneLayout {
     pub(crate) terminal_command: Option<String>,
     pub(crate) is_focused: bool,
     pub(crate) is_floating: bool,
+    pub(crate) is_suppressed: bool,
     pub(crate) pane_x: usize,
     pub(crate) pane_y: usize,
     pub(crate) pane_columns: usize,
@@ -319,6 +320,7 @@ fn build_terminal_panes_by_tab(
                     terminal_command: pane.terminal_command.clone(),
                     is_focused: pane.is_focused,
                     is_floating: pane.is_floating,
+                    is_suppressed: pane.is_suppressed,
                     pane_x: pane.pane_x,
                     pane_y: pane.pane_y,
                     pane_columns: pane.pane_columns,
@@ -611,6 +613,9 @@ impl State {
             .get(&active_tab_id)
             .cloned()
             .unwrap_or_default();
+        let visible_popup_is_open = terminal_panes
+            .iter()
+            .any(|pane| is_visible_popup_pane(&pane.title, pane.is_floating, pane.is_suppressed));
         let managed_sidebar_pane_id = managed_tab_panes.sidebar.map(|managed| managed.pane_id);
         let managed_agent_pane_id = managed_tab_panes.agent.map(|managed| managed.pane_id);
         let pane_snapshots: Vec<HorizontalPaneSnapshot> = terminal_panes
@@ -635,6 +640,7 @@ impl State {
         match resolve_horizontal_focus(
             &pane_snapshots,
             direction,
+            visible_popup_is_open,
             sidebar_is_closed,
             agent_is_closed,
         ) {
