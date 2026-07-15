@@ -65,6 +65,33 @@ pub fn terminal_title_activity_state(title: &str) -> Option<SessionAiPaneActivit
     None
 }
 
+pub fn managed_terminal_title_activity_state(
+    title: &str,
+    terminal_command: Option<&str>,
+    command_marker: Option<&str>,
+) -> Option<SessionAiPaneActivityState> {
+    if command_marker.is_some()
+        && !terminal_command_matches_marker(terminal_command, command_marker)
+    {
+        return None;
+    }
+    terminal_title_activity_state(title)
+}
+
+pub fn terminal_command_matches_marker(
+    terminal_command: Option<&str>,
+    command_marker: Option<&str>,
+) -> bool {
+    command_marker
+        .map(str::trim)
+        .filter(|marker| !marker.is_empty())
+        .is_some_and(|marker| {
+            terminal_command
+                .map(str::trim)
+                .is_some_and(|command| command.contains(marker))
+        })
+}
+
 pub fn terminal_activity_title_base(title: &str) -> Option<&str> {
     let title = title.trim();
     let (spinner, base_name) = title.split_once(' ')?;
@@ -206,5 +233,23 @@ mod tests {
             Some(SessionAiPaneActivityState::Active)
         );
         assert_eq!(terminal_title_activity_state("yazelix"), None);
+    }
+
+    #[test]
+    fn managed_terminal_title_activity_requires_the_configured_command() {
+        let command = "/nix/store/agent/bin/yzx-agent";
+
+        assert_eq!(
+            managed_terminal_title_activity_state("⠋ Codex", Some(command), Some(command)),
+            Some(SessionAiPaneActivityState::Active)
+        );
+        assert_eq!(
+            managed_terminal_title_activity_state("⠋ Codex", Some("/bin/codex"), Some(command),),
+            None
+        );
+        assert_eq!(
+            managed_terminal_title_activity_state("Codex", Some(command), Some(command)),
+            None
+        );
     }
 }

@@ -68,6 +68,7 @@ struct State {
     screen_saver_config: ScreenSaverConfig,
     right_sidebar_command: Option<RightSidebarCommandConfig>,
     popup_plugin_url: Option<String>,
+    managed_agent_command_marker: Option<String>,
     screen_saver_last_input: Option<Instant>,
     screen_saver_next_timeout: Option<Instant>,
     screen_saver_pane_id: Option<PaneId>,
@@ -114,6 +115,10 @@ impl ZellijPlugin for State {
             RightSidebarCommandConfig::from_plugin_configuration(&configuration);
         self.popup_plugin_url = configuration
             .get("popup_plugin_url")
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        self.managed_agent_command_marker = configuration
+            .get("managed_agent_command_marker")
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
         self.status_usage_provider_config =

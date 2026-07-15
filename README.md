@@ -77,18 +77,13 @@ previous provenance when rolling back a failed multi-step retarget.
 popup id as its payload, and forwards that id with the active tab's canonical
 workspace root to the loaded popup instance matching that URL.
 
-`register_ai_pane_activity` records tab-local AI activity facts. When any fact
-is `active` or `thinking`, or when a live spinner-prefixed terminal title such
-as Codex's activity title is present, the plugin suffixes that tab's Zellij name
-with `·`. When a fact is `stale`, the plugin suffixes the tab name with `✓`.
-Stale takes priority over busy, and busy takes priority over no marker.
-Spinner-prefixed terminal titles are remembered by producing pane: when the
-title stops indicating activity while that pane is not focused, the tab switches
-to `✓` and stays there until the user focuses that producing pane. This uses
-native Zellij tab names so status bars that render tab names can show the
-activity state without a second widget API. Native tab-name writes are coalesced
-and rate-limited so terminal-title animation cannot produce a rename for every
-spinner frame.
+`register_ai_pane_activity` records tab-local AI activity facts. Live
+spinner-prefixed terminal titles such as Codex's activity title provide the same
+fact when their pane command matches the optional
+`managed_agent_command_marker`. The fact is removed when the spinner title
+disappears or the pane exits. The plugin reduces all facts by stable tab id and
+publishes the complete snapshot through `pipe_tab_activity` to each detected
+zjstatus plugin. It never writes activity into native Zellij tab names.
 
 Editor command-mode integration is Neovim-only. Helix buffer opens and cwd sync are owned by the Yazelix Helix action bridge; direct Helix `open_file`, `set_managed_editor_cwd`, or `retarget_workspace` editor requests are rejected instead of sending `:open` or `:cd` text into the terminal.
 

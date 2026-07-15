@@ -613,9 +613,15 @@ impl State {
             .get(&active_tab_id)
             .cloned()
             .unwrap_or_default();
-        let visible_popup_is_open = terminal_panes
-            .iter()
-            .any(|pane| is_visible_popup_pane(&pane.title, pane.is_floating, pane.is_suppressed));
+        let visible_popup_is_open = terminal_panes.iter().any(|pane| {
+            is_visible_popup_pane(
+                &pane.title,
+                pane.terminal_command.as_deref(),
+                self.managed_agent_command_marker.as_deref(),
+                pane.is_floating,
+                pane.is_suppressed,
+            )
+        });
         let managed_sidebar_pane_id = managed_tab_panes.sidebar.map(|managed| managed.pane_id);
         let managed_agent_pane_id = managed_tab_panes.agent.map(|managed| managed.pane_id);
         let pane_snapshots: Vec<HorizontalPaneSnapshot> = terminal_panes

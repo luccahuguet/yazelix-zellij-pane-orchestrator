@@ -4,8 +4,9 @@ use serde::Deserialize;
 use yazelix_zellij_pane_orchestrator::active_tab_session_state::SessionAiPaneActivity;
 use yazelix_zellij_pane_orchestrator::active_tab_session_state::SessionAiPaneActivityState;
 use yazelix_zellij_pane_orchestrator::ai_pane_activity_contract::{
-    normalized_ai_activity_state, remove_ai_pane_activity_fact, terminal_title_activity_state,
-    upsert_ai_pane_activity_fact, AiPaneActivityRegistration, TERMINAL_TITLE_ACTIVITY_PROVIDER,
+    managed_terminal_title_activity_state, normalized_ai_activity_state,
+    remove_ai_pane_activity_fact, upsert_ai_pane_activity_fact, AiPaneActivityRegistration,
+    TERMINAL_TITLE_ACTIVITY_PROVIDER,
 };
 use yazelix_zellij_pane_orchestrator::tab_activity_snapshot_contract::{
     build_all_tab_activity_snapshot_v1, AllTabActivitySnapshotV1, TabActivityReadState,
@@ -164,6 +165,8 @@ impl State {
                 observation.tab_id,
                 pane_id,
                 observation.title,
+                None,
+                None,
             );
         }
 
@@ -253,19 +256,31 @@ impl State {
     }
 
     fn reconcile_terminal_title_ai_activity(&mut self) {
+        let command_marker = self.managed_agent_command_marker.clone();
         let observations = self
             .tab_pane_caches
             .terminal_panes_by_tab
             .iter()
             .flat_map(|(tab_id, panes)| {
-                panes
-                    .iter()
-                    .map(move |pane| (*tab_id, pane.pane_id, pane.title.clone()))
+                panes.iter().map(move |pane| {
+                    (
+                        *tab_id,
+                        pane.pane_id,
+                        pane.title.clone(),
+                        pane.terminal_command.clone(),
+                    )
+                })
             })
             .collect::<Vec<_>>();
 
-        for (tab_id, pane_id, title) in observations {
-            self.reconcile_terminal_title_activity_observation(tab_id, pane_id, title);
+        for (tab_id, pane_id, title, terminal_command) in observations {
+            self.reconcile_terminal_title_activity_observation(
+                tab_id,
+                pane_id,
+                title,
+                terminal_command.as_deref(),
+                command_marker.as_deref(),
+            );
         }
 
         self.retain_nonempty_ai_activity_tabs();
@@ -276,6 +291,8 @@ impl State {
         tab_id: usize,
         pane_id: PaneId,
         title: String,
+        terminal_command: Option<&str>,
+        command_marker: Option<&str>,
     ) -> bool {
         let Some(pane_id) = pane_id_to_string(Some(pane_id)) else {
             return false;
@@ -288,7 +305,9 @@ impl State {
                 })
                 .map(|fact| fact.state)
         });
-        let Some(state) = terminal_title_activity_state(&title) else {
+        let Some(state) =
+            managed_terminal_title_activity_state(&title, terminal_command, command_marker)
+        else {
             return self.remove_terminal_title_activity_fact(tab_id, &pane_id);
         };
 

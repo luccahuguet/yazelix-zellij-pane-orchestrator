@@ -1,3 +1,5 @@
+use crate::ai_pane_activity_contract::terminal_command_matches_marker;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HorizontalDirection {
     Left,
@@ -31,8 +33,17 @@ pub fn horizontal_role_for_pane<Id: PartialEq>(
     }
 }
 
-pub fn is_visible_popup_pane(pane_title: &str, is_floating: bool, is_suppressed: bool) -> bool {
-    is_floating && !is_suppressed && pane_title.trim().ends_with("_popup")
+pub fn is_visible_popup_pane(
+    pane_title: &str,
+    terminal_command: Option<&str>,
+    managed_agent_command_marker: Option<&str>,
+    is_floating: bool,
+    is_suppressed: bool,
+) -> bool {
+    is_floating
+        && !is_suppressed
+        && (pane_title.trim().ends_with("_popup")
+            || terminal_command_matches_marker(terminal_command, managed_agent_command_marker))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -255,12 +266,27 @@ mod tests {
 
     // Defends: only visible floating popup panes own horizontal tab navigation.
     #[test]
-    fn visible_popup_identity_requires_floating_unsuppressed_popup_title() {
-        assert!(is_visible_popup_pane("config_popup", true, false));
-        assert!(is_visible_popup_pane(" agent_popup ", true, false));
-        assert!(!is_visible_popup_pane("config_popup", true, true));
-        assert!(!is_visible_popup_pane("config_popup", false, false));
-        assert!(!is_visible_popup_pane("editor", true, false));
+    fn visible_popup_identity_accepts_title_or_managed_agent_command() {
+        let marker = Some("/nix/store/agent/bin/yzx-agent");
+        let visible = |title, command| is_visible_popup_pane(title, command, marker, true, false);
+
+        assert!(visible("config_popup", None));
+        assert!(visible("Codex", marker));
+        assert!(!visible("Codex", Some("/bin/codex")));
+        assert!(!is_visible_popup_pane(
+            "agent_popup",
+            None,
+            None,
+            true,
+            true
+        ));
+        assert!(!is_visible_popup_pane(
+            "agent_popup",
+            None,
+            None,
+            false,
+            false
+        ));
     }
 
     // Regression: activity-driven terminal titles must not make a managed agent pane look like
