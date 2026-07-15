@@ -12,7 +12,9 @@ use crate::panes::pane_id_to_string;
 use crate::sidebar_yazi::SidebarYaziState;
 use crate::{State, COMMAND_STEP_DELAY_MS, RESULT_INVALID_PAYLOAD, RESULT_MISSING, RESULT_OK};
 use yazelix_zellij_pane_orchestrator::editor_open_contract::build_editor_change_directory_command;
-use yazelix_zellij_pane_orchestrator::workspace_popup_contract::workspace_popup_payload;
+use yazelix_zellij_pane_orchestrator::workspace_popup_contract::{
+    workspace_popup_destination_id, workspace_popup_payload,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WorkspaceState {
@@ -292,10 +294,23 @@ impl State {
             self.respond(pipe_message, RESULT_MISSING);
             return;
         };
+        let Some(destination_plugin_id) = self.last_pane_manifest.as_ref().and_then(|manifest| {
+            workspace_popup_destination_id(
+                plugin_url,
+                manifest
+                    .panes
+                    .values()
+                    .flatten()
+                    .map(|pane| (pane.id, pane.exited, pane.plugin_url.as_deref())),
+            )
+        }) else {
+            self.respond(pipe_message, RESULT_MISSING);
+            return;
+        };
 
         pipe_message_to_plugin(
             MessageToPlugin::new("toggle")
-                .with_plugin_url(plugin_url)
+                .with_destination_plugin_id(destination_plugin_id)
                 .with_payload(payload),
         );
         self.respond(pipe_message, RESULT_OK);

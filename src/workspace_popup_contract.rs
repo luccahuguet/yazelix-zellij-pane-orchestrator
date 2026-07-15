@@ -20,6 +20,22 @@ pub fn workspace_popup_payload(popup_id: &str, workspace_root: &str) -> Option<S
     .ok()
 }
 
+pub fn workspace_popup_destination_id<'a>(
+    expected_plugin_url: &str,
+    panes: impl IntoIterator<Item = (u32, bool, Option<&'a str>)>,
+) -> Option<u32> {
+    let expected_plugin_url = expected_plugin_url.trim();
+    if expected_plugin_url.is_empty() {
+        return None;
+    }
+    panes
+        .into_iter()
+        .find(|(_, exited, plugin_url)| {
+            !*exited && plugin_url.is_some_and(|url| url == expected_plugin_url)
+        })
+        .map(|(id, _, _)| id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -38,5 +54,17 @@ mod tests {
 
         assert!(workspace_popup_payload("", "/repo").is_none());
         assert!(workspace_popup_payload("agent", "repo").is_none());
+    }
+
+    #[test]
+    fn workspace_popup_targets_the_loaded_plugin_instance() {
+        let panes = [
+            (7, false, None),
+            (8, true, Some("yzpp")),
+            (9, false, Some("other")),
+            (10, false, Some("yzpp")),
+        ];
+        assert_eq!(workspace_popup_destination_id(" yzpp ", panes), Some(10));
+        assert_eq!(workspace_popup_destination_id("missing", panes), None);
     }
 }

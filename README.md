@@ -75,7 +75,7 @@ Yazelix integration commands depend on Yazelix-managed editor/sidebar/workspace 
 previous provenance when rolling back a failed multi-step retarget.
 `toggle_workspace_popup` requires a configured `popup_plugin_url`, accepts a
 popup id as its payload, and forwards that id with the active tab's canonical
-workspace root as the popup request cwd.
+workspace root to the loaded popup instance matching that URL.
 
 `register_ai_pane_activity` records tab-local AI activity facts. When any fact
 is `active` or `thinking`, or when a live spinner-prefixed terminal title such
