@@ -67,7 +67,15 @@ Yazelix integration commands depend on Yazelix-managed editor/sidebar/workspace 
 - `register_sidebar_yazi_state`
 - `register_ai_pane_activity`
 - `retarget_workspace`
+- `toggle_workspace_popup`
 - `reload_runtime_config`
+
+`retarget_workspace` accepts an optional `workspace_source` of `explicit` or
+`bootstrap`; callers normally omit it, while coordinators can preserve the
+previous provenance when rolling back a failed multi-step retarget.
+`toggle_workspace_popup` requires a configured `popup_plugin_url`, accepts a
+popup id as its payload, and forwards that id with the active tab's canonical
+workspace root as the popup request cwd.
 
 `register_ai_pane_activity` records tab-local AI activity facts. When any fact
 is `active` or `thinking`, or when a live spinner-prefixed terminal title such

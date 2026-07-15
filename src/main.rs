@@ -67,6 +67,7 @@ struct State {
     runtime_dir: PathBuf,
     screen_saver_config: ScreenSaverConfig,
     right_sidebar_command: Option<RightSidebarCommandConfig>,
+    popup_plugin_url: Option<String>,
     screen_saver_last_input: Option<Instant>,
     screen_saver_next_timeout: Option<Instant>,
     screen_saver_pane_id: Option<PaneId>,
@@ -111,6 +112,10 @@ impl ZellijPlugin for State {
         self.screen_saver_config = ScreenSaverConfig::from_plugin_configuration(&configuration);
         self.right_sidebar_command =
             RightSidebarCommandConfig::from_plugin_configuration(&configuration);
+        self.popup_plugin_url = configuration
+            .get("popup_plugin_url")
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
         self.status_usage_provider_config =
             StatusUsageProviderConfig::from_plugin_configuration(&configuration);
         self.runtime_config_generation = configuration
@@ -303,6 +308,10 @@ impl ZellijPlugin for State {
             }
             "open_workspace_terminal" => {
                 self.open_workspace_terminal(&pipe_message);
+                false
+            }
+            "toggle_workspace_popup" => {
+                self.toggle_workspace_popup(&pipe_message);
                 false
             }
             "reload_runtime_config" => {

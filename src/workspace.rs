@@ -12,6 +12,7 @@ use crate::panes::pane_id_to_string;
 use crate::sidebar_yazi::SidebarYaziState;
 use crate::{State, COMMAND_STEP_DELAY_MS, RESULT_INVALID_PAYLOAD, RESULT_MISSING, RESULT_OK};
 use yazelix_zellij_pane_orchestrator::editor_open_contract::build_editor_change_directory_command;
+use yazelix_zellij_pane_orchestrator::workspace_popup_contract::workspace_popup_payload;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WorkspaceState {
@@ -23,7 +24,8 @@ pub(crate) fn bootstrap_workspace_root(initial_cwd: &Path) -> String {
     initial_cwd.display().to_string()
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum WorkspaceStateSource {
     Bootstrap,
     Explicit,
@@ -32,6 +34,8 @@ pub(crate) enum WorkspaceStateSource {
 #[derive(Deserialize)]
 struct WorkspaceRetargetRequest {
     workspace_root: String,
+    #[serde(default)]
+    workspace_source: Option<WorkspaceStateSource>,
     cd_focused_pane: bool,
     editor: Option<String>,
     sidebar_yazi: Option<WorkspaceSidebarYaziRegistration>,
@@ -117,7 +121,12 @@ impl State {
             return;
         }
 
-        let workspace_state = WorkspaceState::from_explicit_root(workspace_root.clone());
+        let workspace_state = WorkspaceState {
+            root: workspace_root,
+            source: workspace_retarget_request
+                .workspace_source
+                .unwrap_or(WorkspaceStateSource::Explicit),
+        };
         rename_tab(
             tab_index_from_position(active_tab_position),
             &tab_name_from_workspace_root(&workspace_state.root),
@@ -258,6 +267,39 @@ impl State {
         open_terminal(&workspace_state.root);
         self.respond(pipe_message, RESULT_OK);
     }
+
+    pub(crate) fn toggle_workspace_popup(&self, pipe_message: &PipeMessage) {
+        let Some(active_tab_id) = self.ensure_action_ready(pipe_message) else {
+            return;
+        };
+        let Some(workspace_state) = self
+            .workspace_state_by_tab
+            .get(&active_tab_id)
+            .or(self.initial_workspace_state.as_ref())
+        else {
+            self.respond(pipe_message, RESULT_MISSING);
+            return;
+        };
+        let Some(payload) = pipe_message
+            .payload
+            .as_deref()
+            .and_then(|popup_id| workspace_popup_payload(popup_id, &workspace_state.root))
+        else {
+            self.respond(pipe_message, RESULT_INVALID_PAYLOAD);
+            return;
+        };
+        let Some(plugin_url) = self.popup_plugin_url.as_deref() else {
+            self.respond(pipe_message, RESULT_MISSING);
+            return;
+        };
+
+        pipe_message_to_plugin(
+            MessageToPlugin::new("toggle")
+                .with_plugin_url(plugin_url)
+                .with_payload(payload),
+        );
+        self.respond(pipe_message, RESULT_OK);
+    }
 }
 
 impl WorkspaceState {
@@ -265,13 +307,6 @@ impl WorkspaceState {
         Self {
             root,
             source: WorkspaceStateSource::Bootstrap,
-        }
-    }
-
-    pub(crate) fn from_explicit_root(root: String) -> Self {
-        Self {
-            root,
-            source: WorkspaceStateSource::Explicit,
         }
     }
 }
