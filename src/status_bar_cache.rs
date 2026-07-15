@@ -107,31 +107,14 @@ impl State {
 
     fn publish_tab_activity_status_pipe(&mut self, tab_activity_payload: &str) {
         let payload = tab_activity_pipe_protocol_payload(tab_activity_payload);
-        let plugin_ids = self
-            .tab_pane_caches
-            .zjstatus_plugin_id_by_tab
-            .values()
-            .copied()
-            .collect::<Vec<_>>();
-
-        for plugin_id in plugin_ids {
-            if self
-                .tab_activity_pipe_payload_by_plugin
-                .get(&plugin_id)
-                .map(String::as_str)
-                == Some(payload.as_str())
-            {
-                continue;
-            }
-
-            pipe_message_to_plugin(
-                MessageToPlugin::new(ZJSTATUS_TAB_ACTIVITY_PIPE_MESSAGE)
-                    .with_destination_plugin_id(plugin_id)
-                    .with_payload(payload.clone()),
-            );
-            self.tab_activity_pipe_payload_by_plugin
-                .insert(plugin_id, payload.clone());
+        if self.tab_activity_pipe_payload.as_deref() == Some(payload.as_str()) {
+            return;
         }
+
+        pipe_message_to_plugin(
+            MessageToPlugin::new(ZJSTATUS_TAB_ACTIVITY_PIPE_MESSAGE).with_payload(payload.clone()),
+        );
+        self.tab_activity_pipe_payload = Some(payload);
     }
 
     fn workspace_status_pipe_payload(&self, active_tab_id: usize) -> String {

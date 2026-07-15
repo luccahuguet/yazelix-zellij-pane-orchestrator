@@ -82,8 +82,9 @@ spinner-prefixed terminal titles such as Codex's activity title provide the same
 fact when their pane command matches the optional
 `managed_agent_command_marker`. The fact is removed when the spinner title
 disappears or the pane exits. The plugin reduces all facts by stable tab id and
-publishes the complete snapshot through `pipe_tab_activity` to each detected
-zjstatus plugin. It never writes activity into native Zellij tab names.
+broadcasts the complete snapshot through `pipe_tab_activity`; compatible status
+bars consume it and unrelated plugins ignore it. It never writes activity into
+native Zellij tab names.
 
 Editor command-mode integration is Neovim-only. Helix buffer opens and cwd sync are owned by the Yazelix Helix action bridge; direct Helix `open_file`, `set_managed_editor_cwd`, or `retarget_workspace` editor requests are rejected instead of sending `:open` or `:cd` text into the terminal.
 

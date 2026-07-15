@@ -76,7 +76,7 @@ struct State {
     status_bar_cache_runtime: Option<StatusBarCacheRuntime>,
     status_bar_cache_last_payload: Option<String>,
     workspace_status_pipe_payload_by_plugin: HashMap<u32, String>,
-    tab_activity_pipe_payload_by_plugin: HashMap<u32, String>,
+    tab_activity_pipe_payload: Option<String>,
     status_bar_claude_usage_next_refresh: Option<Instant>,
     status_bar_codex_usage_next_refresh: Option<Instant>,
     status_bar_opencode_go_usage_next_refresh: Option<Instant>,
@@ -351,14 +351,27 @@ impl State {
             return;
         }
 
+        let previous_zjstatus_plugin_ids = self
+            .tab_pane_caches
+            .zjstatus_plugin_id_by_tab
+            .values()
+            .copied()
+            .collect::<HashSet<_>>();
         self.tab_pane_caches = panes::TabPaneCaches::rebuild(
             pane_manifest,
             self.tab_identity.tab_id_by_position(),
             &self.tab_pane_caches.focus_context_by_tab,
         );
+        let current_zjstatus_plugin_ids = self
+            .tab_pane_caches
+            .zjstatus_plugin_id_by_tab
+            .values()
+            .copied()
+            .collect::<HashSet<_>>();
+        if current_zjstatus_plugin_ids != previous_zjstatus_plugin_ids {
+            self.tab_activity_pipe_payload = None;
+        }
         self.workspace_status_pipe_payload_by_plugin
-            .retain(|plugin_id, _| self.tab_pane_caches.has_zjstatus_plugin_id(*plugin_id));
-        self.tab_activity_pipe_payload_by_plugin
             .retain(|plugin_id, _| self.tab_pane_caches.has_zjstatus_plugin_id(*plugin_id));
         self.reconcile_sidebar_yazi_state();
         self.reconcile_ai_pane_activity_panes();
