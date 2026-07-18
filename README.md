@@ -78,11 +78,11 @@ previous provenance when rolling back a failed multi-step retarget.
 `toggle_workspace_popup` requires a configured `popup_plugin_url`, accepts a
 popup id as its payload, and forwards that id with the active tab's canonical
 workspace root to the loaded popup instance matching that URL.
-`register_workspace_popup_yazi_state` associates a workspace popup pane id with
-its Yazi receiver id. With `workspace_yazi_pane_title` and `yazi_cli`
-configured, `open_workspace_zoxide_picker` shows or focuses that popup and
-delivers one targeted `zoxide-editor` plugin event, queueing it until first
-registration when the popup has not launched yet.
+`register_workspace_popup_yazi_state` associates a workspace popup pane id and
+Yazi receiver id with its absolute launch cwd. With `workspace_yazi_pane_title`
+and `yazi_cli` configured, `open_workspace_zoxide_picker` shows or focuses that
+popup and delivers one targeted `zoxide-editor` plugin event, queueing it until
+an instance registered for the active workspace is ready.
 
 `register_ai_pane_activity` records tab-local AI activity facts. Live
 spinner-prefixed terminal titles such as Codex's activity title provide the same

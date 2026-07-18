@@ -20,6 +20,14 @@ pub fn workspace_popup_payload(popup_id: &str, workspace_root: &str) -> Option<S
     .ok()
 }
 
+pub fn workspace_popup_launch_matches_root(launch_cwd: &str, workspace_root: &str) -> bool {
+    let launch_cwd = launch_cwd.trim();
+    let workspace_root = workspace_root.trim();
+    Path::new(launch_cwd).is_absolute()
+        && Path::new(workspace_root).is_absolute()
+        && launch_cwd.trim_end_matches('/') == workspace_root.trim_end_matches('/')
+}
+
 pub fn workspace_popup_destination_id<'a>(
     expected_plugin_url: &str,
     panes: impl IntoIterator<Item = (u32, bool, Option<&'a str>)>,
@@ -66,5 +74,17 @@ mod tests {
         ];
         assert_eq!(workspace_popup_destination_id(" yzpp ", panes), Some(10));
         assert_eq!(workspace_popup_destination_id("missing", panes), None);
+    }
+
+    #[test]
+    fn workspace_popup_launch_must_match_the_active_workspace() {
+        assert!(workspace_popup_launch_matches_root(" /repo/ ", "/repo"));
+        assert!(workspace_popup_launch_matches_root(
+            "/repo with spaces",
+            " /repo with spaces/ "
+        ));
+        assert!(!workspace_popup_launch_matches_root("/old", "/repo"));
+        assert!(!workspace_popup_launch_matches_root("", "/repo"));
+        assert!(!workspace_popup_launch_matches_root("repo", "repo"));
     }
 }

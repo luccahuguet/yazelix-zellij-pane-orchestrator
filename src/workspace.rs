@@ -14,7 +14,7 @@ use crate::sidebar_yazi::SidebarYaziState;
 use crate::{State, COMMAND_STEP_DELAY_MS, RESULT_INVALID_PAYLOAD, RESULT_MISSING, RESULT_OK};
 use yazelix_zellij_pane_orchestrator::editor_open_contract::build_editor_change_directory_command;
 use yazelix_zellij_pane_orchestrator::workspace_popup_contract::{
-    workspace_popup_destination_id, workspace_popup_payload,
+    workspace_popup_destination_id, workspace_popup_launch_matches_root, workspace_popup_payload,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,6 +27,7 @@ pub(crate) struct WorkspaceState {
 pub(crate) struct WorkspacePopupYaziState {
     pane_id: String,
     yazi_id: String,
+    launch_cwd: String,
 }
 
 pub(crate) fn bootstrap_workspace_root(initial_cwd: &Path) -> String {
@@ -74,6 +75,7 @@ struct OpenTerminalRequest {
 struct WorkspacePopupYaziRegistration {
     pane_id: String,
     yazi_id: String,
+    cwd: String,
 }
 
 impl State {
@@ -131,7 +133,8 @@ impl State {
         };
         let pane_id = registration.pane_id.trim().to_string();
         let yazi_id = registration.yazi_id.trim().to_string();
-        if pane_id.is_empty() || yazi_id.is_empty() {
+        let launch_cwd = registration.cwd.trim().to_string();
+        if pane_id.is_empty() || yazi_id.is_empty() || !Path::new(&launch_cwd).is_absolute() {
             self.respond(pipe_message, RESULT_INVALID_PAYLOAD);
             return;
         }
@@ -149,9 +152,13 @@ impl State {
             WorkspacePopupYaziState {
                 pane_id,
                 yazi_id: yazi_id.clone(),
+                launch_cwd: launch_cwd.clone(),
             },
         );
-        if self.pending_workspace_zoxide_picker_by_tab.remove(&tab_id) {
+        let launch_matches_workspace = self
+            .workspace_root_for_tab(tab_id)
+            .is_some_and(|root| workspace_popup_launch_matches_root(&launch_cwd, root));
+        if launch_matches_workspace && self.pending_workspace_zoxide_picker_by_tab.remove(&tab_id) {
             self.launch_zoxide_picker(&yazi_id);
         }
         self.respond(pipe_message, RESULT_OK);
@@ -198,6 +205,8 @@ impl State {
         );
         self.workspace_state_by_tab
             .insert(active_tab_id, workspace_state.clone());
+        self.pending_workspace_zoxide_picker_by_tab
+            .remove(&active_tab_id);
 
         if let Some(registration) = workspace_retarget_request.sidebar_yazi {
             self.register_inline_sidebar_yazi_state(active_tab_id, registration);
@@ -337,8 +346,11 @@ impl State {
         let Some(active_tab_id) = self.ensure_action_ready(pipe_message) else {
             return;
         };
-        match self.send_workspace_popup_action(active_tab_id, pipe_message, "toggle") {
-            Ok(()) => self.respond(pipe_message, RESULT_OK),
+        match self.workspace_popup_action_message(active_tab_id, pipe_message, "toggle") {
+            Ok(message) => {
+                pipe_message_to_plugin(message);
+                self.respond(pipe_message, RESULT_OK);
+            }
             Err(result) => self.respond(pipe_message, result),
         }
     }
@@ -352,46 +364,59 @@ impl State {
             return;
         }
         let popup_pane_id_by_tab = self.workspace_yazi_pane_id_by_tab();
+        let Some(workspace_root) = self.workspace_root_for_tab(active_tab_id) else {
+            self.respond(pipe_message, RESULT_MISSING);
+            return;
+        };
         let action = if popup_pane_id_by_tab.contains_key(&active_tab_id) {
             "focus"
         } else {
             "toggle"
         };
-        if let Err(result) = self.send_workspace_popup_action(active_tab_id, pipe_message, action) {
-            self.respond(pipe_message, result);
-            return;
-        }
+        let popup_message =
+            match self.workspace_popup_action_message(active_tab_id, pipe_message, action) {
+                Ok(message) => message,
+                Err(result) => {
+                    self.respond(pipe_message, result);
+                    return;
+                }
+            };
 
-        if let Some(state) = self
+        let picker_receiver = self
             .workspace_popup_yazi_state_by_tab
             .get(&active_tab_id)
             .filter(|state| popup_pane_id_by_tab.get(&active_tab_id) == Some(&state.pane_id))
-        {
-            self.launch_zoxide_picker(&state.yazi_id);
-        } else {
+            .filter(|state| workspace_popup_launch_matches_root(&state.launch_cwd, workspace_root))
+            .map(|state| state.yazi_id.clone());
+        if picker_receiver.is_none() {
             self.pending_workspace_zoxide_picker_by_tab
                 .insert(active_tab_id);
+        }
+        pipe_message_to_plugin(popup_message);
+
+        if let Some(receiver) = picker_receiver {
+            self.pending_workspace_zoxide_picker_by_tab
+                .remove(&active_tab_id);
+            self.launch_zoxide_picker(&receiver);
         }
         self.respond(pipe_message, RESULT_OK);
     }
 
-    fn send_workspace_popup_action(
+    fn workspace_popup_action_message(
         &self,
         active_tab_id: usize,
         pipe_message: &PipeMessage,
         action: &str,
-    ) -> Result<(), &'static str> {
-        let workspace_state = self
-            .workspace_state_by_tab
-            .get(&active_tab_id)
-            .or(self.initial_workspace_state.as_ref())
+    ) -> Result<MessageToPlugin, &'static str> {
+        let workspace_root = self
+            .workspace_root_for_tab(active_tab_id)
             .ok_or(RESULT_MISSING)?;
         let popup_id = pipe_message
             .payload
             .as_deref()
             .ok_or(RESULT_INVALID_PAYLOAD)?;
-        let payload = workspace_popup_payload(popup_id, &workspace_state.root)
-            .ok_or(RESULT_INVALID_PAYLOAD)?;
+        let payload =
+            workspace_popup_payload(popup_id, workspace_root).ok_or(RESULT_INVALID_PAYLOAD)?;
         let plugin_url = self.popup_plugin_url.as_deref().ok_or(RESULT_MISSING)?;
         let destination_plugin_id = self
             .last_pane_manifest
@@ -408,12 +433,9 @@ impl State {
             })
             .ok_or(RESULT_MISSING)?;
 
-        pipe_message_to_plugin(
-            MessageToPlugin::new(action)
-                .with_destination_plugin_id(destination_plugin_id)
-                .with_payload(payload),
-        );
-        Ok(())
+        Ok(MessageToPlugin::new(action)
+            .with_destination_plugin_id(destination_plugin_id)
+            .with_payload(payload))
     }
 
     fn workspace_yazi_pane_id_by_tab(&self) -> HashMap<usize, String> {
@@ -431,6 +453,13 @@ impl State {
                     .map(|pane_id| (*tab_id, pane_id))
             })
             .collect()
+    }
+
+    fn workspace_root_for_tab(&self, tab_id: usize) -> Option<&str> {
+        self.workspace_state_by_tab
+            .get(&tab_id)
+            .or(self.initial_workspace_state.as_ref())
+            .map(|workspace| workspace.root.as_str())
     }
 
     fn launch_zoxide_picker(&self, receiver: &str) {
