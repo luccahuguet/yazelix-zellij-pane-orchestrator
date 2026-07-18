@@ -14,8 +14,7 @@ use crate::sidebar_yazi::SidebarYaziState;
 use crate::{State, COMMAND_STEP_DELAY_MS, RESULT_INVALID_PAYLOAD, RESULT_MISSING, RESULT_OK};
 use yazelix_zellij_pane_orchestrator::editor_open_contract::build_editor_change_directory_command;
 use yazelix_zellij_pane_orchestrator::workspace_popup_contract::{
-    workspace_popup_destination_id, workspace_popup_payload, workspace_popup_show_action,
-    yazi_emit_to_args,
+    workspace_popup_destination_id, workspace_popup_payload,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -153,7 +152,7 @@ impl State {
             },
         );
         if self.pending_workspace_zoxide_picker_by_tab.remove(&tab_id) {
-            self.emit_yazi(&yazi_id, "plugin", ["zoxide-editor"]);
+            self.launch_zoxide_picker(&yazi_id);
         }
         self.respond(pipe_message, RESULT_OK);
     }
@@ -352,10 +351,12 @@ impl State {
             self.respond(pipe_message, RESULT_MISSING);
             return;
         }
-        let popup_exists = self
-            .workspace_yazi_pane_id_by_tab()
-            .contains_key(&active_tab_id);
-        let action = workspace_popup_show_action(popup_exists);
+        let popup_pane_id_by_tab = self.workspace_yazi_pane_id_by_tab();
+        let action = if popup_pane_id_by_tab.contains_key(&active_tab_id) {
+            "focus"
+        } else {
+            "toggle"
+        };
         if let Err(result) = self.send_workspace_popup_action(active_tab_id, pipe_message, action) {
             self.respond(pipe_message, result);
             return;
@@ -364,11 +365,9 @@ impl State {
         if let Some(state) = self
             .workspace_popup_yazi_state_by_tab
             .get(&active_tab_id)
-            .filter(|state| {
-                self.workspace_yazi_pane_id_by_tab().get(&active_tab_id) == Some(&state.pane_id)
-            })
+            .filter(|state| popup_pane_id_by_tab.get(&active_tab_id) == Some(&state.pane_id))
         {
-            self.emit_yazi(&state.yazi_id, "plugin", ["zoxide-editor"]);
+            self.launch_zoxide_picker(&state.yazi_id);
         } else {
             self.pending_workspace_zoxide_picker_by_tab
                 .insert(active_tab_id);
@@ -434,21 +433,11 @@ impl State {
             .collect()
     }
 
-    fn emit_yazi(
-        &self,
-        receiver: &str,
-        name: &str,
-        args: impl IntoIterator<Item = impl Into<String>>,
-    ) {
+    fn launch_zoxide_picker(&self, receiver: &str) {
         let Some(yazi_cli) = self.yazi_cli.as_deref() else {
             return;
         };
-        let Some(args) = yazi_emit_to_args(receiver, name, args) else {
-            return;
-        };
-        let command = std::iter::once(yazi_cli)
-            .chain(args.iter().map(String::as_str))
-            .collect::<Vec<_>>();
+        let command = [yazi_cli, "emit-to", receiver, "plugin", "zoxide-editor"];
         run_command_with_env_variables_and_cwd(
             &command,
             get_session_environment_variables(),

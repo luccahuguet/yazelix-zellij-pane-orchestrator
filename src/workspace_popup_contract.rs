@@ -36,37 +36,6 @@ pub fn workspace_popup_destination_id<'a>(
         .map(|(id, _, _)| id)
 }
 
-pub fn workspace_popup_show_action(popup_exists: bool) -> &'static str {
-    if popup_exists {
-        "focus"
-    } else {
-        "toggle"
-    }
-}
-
-pub fn yazi_emit_to_args(
-    receiver: &str,
-    name: &str,
-    args: impl IntoIterator<Item = impl Into<String>>,
-) -> Option<Vec<String>> {
-    let receiver = receiver.trim();
-    let name = name.trim();
-    if receiver.is_empty() || name.is_empty() {
-        return None;
-    }
-
-    Some(
-        [
-            "emit-to".to_string(),
-            receiver.to_string(),
-            name.to_string(),
-        ]
-        .into_iter()
-        .chain(args.into_iter().map(Into::into))
-        .collect(),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,34 +66,5 @@ mod tests {
         ];
         assert_eq!(workspace_popup_destination_id(" yzpp ", panes), Some(10));
         assert_eq!(workspace_popup_destination_id("missing", panes), None);
-    }
-
-    #[test]
-    fn workspace_picker_focuses_a_live_popup_and_toggles_only_to_create_one() {
-        assert_eq!(workspace_popup_show_action(true), "focus");
-        assert_eq!(workspace_popup_show_action(false), "toggle");
-    }
-
-    #[test]
-    fn yazi_events_keep_receiver_and_path_arguments_structured() {
-        assert_eq!(
-            yazi_emit_to_args(" yazi-7 ", "cd", ["/workspace with spaces"]),
-            Some(vec![
-                "emit-to".to_string(),
-                "yazi-7".to_string(),
-                "cd".to_string(),
-                "/workspace with spaces".to_string(),
-            ])
-        );
-        assert_eq!(
-            yazi_emit_to_args("yazi-7", "plugin", ["zoxide-editor"]),
-            Some(vec![
-                "emit-to".to_string(),
-                "yazi-7".to_string(),
-                "plugin".to_string(),
-                "zoxide-editor".to_string(),
-            ])
-        );
-        assert_eq!(yazi_emit_to_args("", "plugin", ["picker"]), None);
     }
 }
