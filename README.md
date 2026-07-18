@@ -82,7 +82,9 @@ workspace root to the loaded popup instance matching that URL.
 Yazi receiver id with its absolute launch cwd. With `workspace_yazi_pane_title`
 and `yazi_cli` configured, `open_workspace_zoxide_picker` shows or focuses that
 popup and delivers one targeted `zoxide-editor` plugin event, queueing it until
-an instance registered for the active workspace is ready.
+an instance registered for the active workspace is ready. If a popup pane exists
+without a usable matching registration, the popup owner replaces it before the
+queued event is delivered.
 
 `register_ai_pane_activity` records tab-local AI activity facts. Live
 spinner-prefixed terminal titles such as Codex's activity title provide the same

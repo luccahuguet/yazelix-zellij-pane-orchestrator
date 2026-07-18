@@ -28,6 +28,14 @@ pub fn workspace_popup_launch_matches_root(launch_cwd: &str, workspace_root: &st
         && launch_cwd.trim_end_matches('/') == workspace_root.trim_end_matches('/')
 }
 
+pub fn workspace_popup_picker_action(popup_exists: bool, receiver_is_usable: bool) -> &'static str {
+    match (popup_exists, receiver_is_usable) {
+        (false, _) => "toggle",
+        (true, true) => "focus",
+        (true, false) => "replace",
+    }
+}
+
 pub fn workspace_popup_destination_id<'a>(
     expected_plugin_url: &str,
     panes: impl IntoIterator<Item = (u32, bool, Option<&'a str>)>,
@@ -86,5 +94,12 @@ mod tests {
         assert!(!workspace_popup_launch_matches_root("/old", "/repo"));
         assert!(!workspace_popup_launch_matches_root("", "/repo"));
         assert!(!workspace_popup_launch_matches_root("repo", "repo"));
+    }
+
+    #[test]
+    fn picker_replaces_an_existing_popup_without_a_usable_receiver() {
+        assert_eq!(workspace_popup_picker_action(false, false), "toggle");
+        assert_eq!(workspace_popup_picker_action(true, true), "focus");
+        assert_eq!(workspace_popup_picker_action(true, false), "replace");
     }
 }

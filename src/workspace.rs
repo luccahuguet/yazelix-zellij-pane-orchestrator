@@ -15,6 +15,7 @@ use crate::{State, COMMAND_STEP_DELAY_MS, RESULT_INVALID_PAYLOAD, RESULT_MISSING
 use yazelix_zellij_pane_orchestrator::editor_open_contract::build_editor_change_directory_command;
 use yazelix_zellij_pane_orchestrator::workspace_popup_contract::{
     workspace_popup_destination_id, workspace_popup_launch_matches_root, workspace_popup_payload,
+    workspace_popup_picker_action,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -368,11 +369,16 @@ impl State {
             self.respond(pipe_message, RESULT_MISSING);
             return;
         };
-        let action = if popup_pane_id_by_tab.contains_key(&active_tab_id) {
-            "focus"
-        } else {
-            "toggle"
-        };
+        let picker_receiver = self
+            .workspace_popup_yazi_state_by_tab
+            .get(&active_tab_id)
+            .filter(|state| popup_pane_id_by_tab.get(&active_tab_id) == Some(&state.pane_id))
+            .filter(|state| workspace_popup_launch_matches_root(&state.launch_cwd, workspace_root))
+            .map(|state| state.yazi_id.clone());
+        let action = workspace_popup_picker_action(
+            popup_pane_id_by_tab.contains_key(&active_tab_id),
+            picker_receiver.is_some(),
+        );
         let popup_message =
             match self.workspace_popup_action_message(active_tab_id, pipe_message, action) {
                 Ok(message) => message,
@@ -382,12 +388,6 @@ impl State {
                 }
             };
 
-        let picker_receiver = self
-            .workspace_popup_yazi_state_by_tab
-            .get(&active_tab_id)
-            .filter(|state| popup_pane_id_by_tab.get(&active_tab_id) == Some(&state.pane_id))
-            .filter(|state| workspace_popup_launch_matches_root(&state.launch_cwd, workspace_root))
-            .map(|state| state.yazi_id.clone());
         if picker_receiver.is_none() {
             self.pending_workspace_zoxide_picker_by_tab
                 .insert(active_tab_id);
