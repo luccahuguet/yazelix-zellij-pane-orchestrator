@@ -302,6 +302,13 @@ impl State {
         );
     }
 
+    pub(crate) fn workspace_state_for_tab(&self, active_tab_id: usize) -> Option<WorkspaceState> {
+        self.workspace_state_by_tab
+            .get(&active_tab_id)
+            .cloned()
+            .or_else(|| self.initial_workspace_state.clone())
+    }
+
     pub(crate) fn open_terminal_in_cwd(&self, pipe_message: &PipeMessage) {
         let Some(_active_tab_id) = self.ensure_action_ready(pipe_message) else {
             return;
@@ -329,12 +336,7 @@ impl State {
             return;
         };
 
-        let Some(workspace_state) = self
-            .workspace_state_by_tab
-            .get(&active_tab_id)
-            .cloned()
-            .or_else(|| self.initial_workspace_state.clone())
-        else {
+        let Some(workspace_state) = self.workspace_state_for_tab(active_tab_id) else {
             self.respond(pipe_message, RESULT_MISSING);
             return;
         };
