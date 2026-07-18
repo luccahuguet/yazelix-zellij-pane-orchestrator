@@ -61,6 +61,8 @@ struct State {
     tab_sync_panes_active_by_tab: HashMap<usize, bool>,
     workspace_state_by_tab: HashMap<usize, WorkspaceState>,
     sidebar_yazi_state_by_tab: HashMap<usize, sidebar_yazi::SidebarYaziState>,
+    workspace_popup_yazi_state_by_tab: HashMap<usize, workspace::WorkspacePopupYaziState>,
+    pending_workspace_zoxide_picker_by_tab: HashSet<usize>,
     ai_pane_activity_by_tab: HashMap<usize, Vec<SessionAiPaneActivity>>,
     seen_tab_ids: HashSet<usize>,
     initial_workspace_state: Option<WorkspaceState>,
@@ -68,6 +70,8 @@ struct State {
     screen_saver_config: ScreenSaverConfig,
     right_sidebar_command: Option<RightSidebarCommandConfig>,
     popup_plugin_url: Option<String>,
+    workspace_yazi_pane_title: Option<String>,
+    yazi_cli: Option<String>,
     managed_agent_command_marker: Option<String>,
     screen_saver_last_input: Option<Instant>,
     screen_saver_next_timeout: Option<Instant>,
@@ -115,6 +119,14 @@ impl ZellijPlugin for State {
             RightSidebarCommandConfig::from_plugin_configuration(&configuration);
         self.popup_plugin_url = configuration
             .get("popup_plugin_url")
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        self.workspace_yazi_pane_title = configuration
+            .get("workspace_yazi_pane_title")
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        self.yazi_cli = configuration
+            .get("yazi_cli")
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
         self.managed_agent_command_marker = configuration
@@ -287,6 +299,10 @@ impl ZellijPlugin for State {
                 self.register_sidebar_yazi_state(&pipe_message);
                 false
             }
+            "register_workspace_popup_yazi_state" => {
+                self.register_workspace_popup_yazi_state(&pipe_message);
+                false
+            }
             "register_ai_pane_activity" => {
                 self.register_ai_pane_activity(&pipe_message);
                 false
@@ -317,6 +333,10 @@ impl ZellijPlugin for State {
             }
             "toggle_workspace_popup" => {
                 self.toggle_workspace_popup(&pipe_message);
+                false
+            }
+            "open_workspace_zoxide_picker" => {
+                self.open_workspace_zoxide_picker(&pipe_message);
                 false
             }
             "reload_runtime_config" => {
@@ -374,6 +394,7 @@ impl State {
         self.workspace_status_pipe_payload_by_plugin
             .retain(|plugin_id, _| self.tab_pane_caches.has_zjstatus_plugin_id(*plugin_id));
         self.reconcile_sidebar_yazi_state();
+        self.reconcile_workspace_popup_yazi_state();
         self.reconcile_ai_pane_activity_panes();
     }
 
@@ -434,6 +455,12 @@ impl State {
             .retain(|tab_id, _| current_tab_ids.contains(tab_id));
         self.tab_pane_caches.retain_current_tabs(&current_tab_ids);
         retain_current_tab_state(&mut self.sidebar_yazi_state_by_tab, &current_tab_ids);
+        retain_current_tab_state(
+            &mut self.workspace_popup_yazi_state_by_tab,
+            &current_tab_ids,
+        );
+        self.pending_workspace_zoxide_picker_by_tab
+            .retain(|tab_id| current_tab_ids.contains(tab_id));
         retain_current_tab_state(&mut self.tab_name_by_tab_id, &current_tab_ids);
         retain_current_tab_state(&mut self.tab_fullscreen_active_by_tab, &current_tab_ids);
         retain_current_tab_state(&mut self.tab_sync_panes_active_by_tab, &current_tab_ids);

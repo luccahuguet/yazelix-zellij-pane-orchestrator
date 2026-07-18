@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::thread::sleep;
 use std::time::Duration;
@@ -13,13 +14,20 @@ use crate::sidebar_yazi::SidebarYaziState;
 use crate::{State, COMMAND_STEP_DELAY_MS, RESULT_INVALID_PAYLOAD, RESULT_MISSING, RESULT_OK};
 use yazelix_zellij_pane_orchestrator::editor_open_contract::build_editor_change_directory_command;
 use yazelix_zellij_pane_orchestrator::workspace_popup_contract::{
-    workspace_popup_destination_id, workspace_popup_payload,
+    workspace_popup_destination_id, workspace_popup_payload, workspace_popup_show_action,
+    yazi_emit_to_args,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WorkspaceState {
     pub(crate) root: String,
     pub(crate) source: WorkspaceStateSource,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WorkspacePopupYaziState {
+    pane_id: String,
+    yazi_id: String,
 }
 
 pub(crate) fn bootstrap_workspace_root(initial_cwd: &Path) -> String {
@@ -63,6 +71,12 @@ struct OpenTerminalRequest {
     cwd: String,
 }
 
+#[derive(Deserialize)]
+struct WorkspacePopupYaziRegistration {
+    pane_id: String,
+    yazi_id: String,
+}
+
 impl State {
     pub(crate) fn reconcile_workspace_state(&mut self, tabs: &[TabInfo]) {
         let current_tab_ids = collect_current_tab_ids(tabs);
@@ -92,6 +106,56 @@ impl State {
         }
 
         self.seen_tab_ids = current_tab_ids;
+    }
+
+    pub(crate) fn reconcile_workspace_popup_yazi_state(&mut self) {
+        let pane_id_by_tab = self.workspace_yazi_pane_id_by_tab();
+        self.workspace_popup_yazi_state_by_tab
+            .retain(|tab_id, state| pane_id_by_tab.get(tab_id) == Some(&state.pane_id));
+    }
+
+    pub(crate) fn register_workspace_popup_yazi_state(&mut self, pipe_message: &PipeMessage) {
+        if !self.permissions_granted {
+            self.respond(pipe_message, crate::RESULT_DENIED);
+            return;
+        }
+        let Some(payload) = pipe_message.payload.as_deref() else {
+            self.respond(pipe_message, RESULT_INVALID_PAYLOAD);
+            return;
+        };
+        let registration: WorkspacePopupYaziRegistration = match serde_json::from_str(payload) {
+            Ok(registration) => registration,
+            Err(_) => {
+                self.respond(pipe_message, RESULT_INVALID_PAYLOAD);
+                return;
+            }
+        };
+        let pane_id = registration.pane_id.trim().to_string();
+        let yazi_id = registration.yazi_id.trim().to_string();
+        if pane_id.is_empty() || yazi_id.is_empty() {
+            self.respond(pipe_message, RESULT_INVALID_PAYLOAD);
+            return;
+        }
+        let Some(tab_id) = self
+            .workspace_yazi_pane_id_by_tab()
+            .into_iter()
+            .find_map(|(tab_id, candidate)| (candidate == pane_id).then_some(tab_id))
+        else {
+            self.respond(pipe_message, RESULT_MISSING);
+            return;
+        };
+
+        self.workspace_popup_yazi_state_by_tab.insert(
+            tab_id,
+            WorkspacePopupYaziState {
+                pane_id,
+                yazi_id: yazi_id.clone(),
+            },
+        );
+        if self.pending_workspace_zoxide_picker_by_tab.remove(&tab_id) {
+            self.emit_yazi(&yazi_id, "plugin", ["zoxide-editor"]);
+        }
+        self.respond(pipe_message, RESULT_OK);
     }
 
     pub(crate) fn retarget_workspace(&mut self, pipe_message: &PipeMessage) {
@@ -274,46 +338,123 @@ impl State {
         let Some(active_tab_id) = self.ensure_action_ready(pipe_message) else {
             return;
         };
-        let Some(workspace_state) = self
+        match self.send_workspace_popup_action(active_tab_id, pipe_message, "toggle") {
+            Ok(()) => self.respond(pipe_message, RESULT_OK),
+            Err(result) => self.respond(pipe_message, result),
+        }
+    }
+
+    pub(crate) fn open_workspace_zoxide_picker(&mut self, pipe_message: &PipeMessage) {
+        let Some(active_tab_id) = self.ensure_action_ready(pipe_message) else {
+            return;
+        };
+        if self.yazi_cli.is_none() || self.workspace_yazi_pane_title.is_none() {
+            self.respond(pipe_message, RESULT_MISSING);
+            return;
+        }
+        let popup_exists = self
+            .workspace_yazi_pane_id_by_tab()
+            .contains_key(&active_tab_id);
+        let action = workspace_popup_show_action(popup_exists);
+        if let Err(result) = self.send_workspace_popup_action(active_tab_id, pipe_message, action) {
+            self.respond(pipe_message, result);
+            return;
+        }
+
+        if let Some(state) = self
+            .workspace_popup_yazi_state_by_tab
+            .get(&active_tab_id)
+            .filter(|state| {
+                self.workspace_yazi_pane_id_by_tab().get(&active_tab_id) == Some(&state.pane_id)
+            })
+        {
+            self.emit_yazi(&state.yazi_id, "plugin", ["zoxide-editor"]);
+        } else {
+            self.pending_workspace_zoxide_picker_by_tab
+                .insert(active_tab_id);
+        }
+        self.respond(pipe_message, RESULT_OK);
+    }
+
+    fn send_workspace_popup_action(
+        &self,
+        active_tab_id: usize,
+        pipe_message: &PipeMessage,
+        action: &str,
+    ) -> Result<(), &'static str> {
+        let workspace_state = self
             .workspace_state_by_tab
             .get(&active_tab_id)
             .or(self.initial_workspace_state.as_ref())
-        else {
-            self.respond(pipe_message, RESULT_MISSING);
-            return;
-        };
-        let Some(payload) = pipe_message
+            .ok_or(RESULT_MISSING)?;
+        let popup_id = pipe_message
             .payload
             .as_deref()
-            .and_then(|popup_id| workspace_popup_payload(popup_id, &workspace_state.root))
-        else {
-            self.respond(pipe_message, RESULT_INVALID_PAYLOAD);
-            return;
-        };
-        let Some(plugin_url) = self.popup_plugin_url.as_deref() else {
-            self.respond(pipe_message, RESULT_MISSING);
-            return;
-        };
-        let Some(destination_plugin_id) = self.last_pane_manifest.as_ref().and_then(|manifest| {
-            workspace_popup_destination_id(
-                plugin_url,
-                manifest
-                    .panes
-                    .values()
-                    .flatten()
-                    .map(|pane| (pane.id, pane.exited, pane.plugin_url.as_deref())),
-            )
-        }) else {
-            self.respond(pipe_message, RESULT_MISSING);
-            return;
-        };
+            .ok_or(RESULT_INVALID_PAYLOAD)?;
+        let payload = workspace_popup_payload(popup_id, &workspace_state.root)
+            .ok_or(RESULT_INVALID_PAYLOAD)?;
+        let plugin_url = self.popup_plugin_url.as_deref().ok_or(RESULT_MISSING)?;
+        let destination_plugin_id = self
+            .last_pane_manifest
+            .as_ref()
+            .and_then(|manifest| {
+                workspace_popup_destination_id(
+                    plugin_url,
+                    manifest
+                        .panes
+                        .values()
+                        .flatten()
+                        .map(|pane| (pane.id, pane.exited, pane.plugin_url.as_deref())),
+                )
+            })
+            .ok_or(RESULT_MISSING)?;
 
         pipe_message_to_plugin(
-            MessageToPlugin::new("toggle")
+            MessageToPlugin::new(action)
                 .with_destination_plugin_id(destination_plugin_id)
                 .with_payload(payload),
         );
-        self.respond(pipe_message, RESULT_OK);
+        Ok(())
+    }
+
+    fn workspace_yazi_pane_id_by_tab(&self) -> HashMap<usize, String> {
+        let Some(expected_title) = self.workspace_yazi_pane_title.as_deref() else {
+            return HashMap::new();
+        };
+        self.tab_pane_caches
+            .terminal_panes_by_tab
+            .iter()
+            .filter_map(|(tab_id, panes)| {
+                panes
+                    .iter()
+                    .find(|pane| pane.is_floating && pane.title.trim() == expected_title)
+                    .and_then(|pane| pane_id_to_string(Some(pane.pane_id)))
+                    .map(|pane_id| (*tab_id, pane_id))
+            })
+            .collect()
+    }
+
+    fn emit_yazi(
+        &self,
+        receiver: &str,
+        name: &str,
+        args: impl IntoIterator<Item = impl Into<String>>,
+    ) {
+        let Some(yazi_cli) = self.yazi_cli.as_deref() else {
+            return;
+        };
+        let Some(args) = yazi_emit_to_args(receiver, name, args) else {
+            return;
+        };
+        let command = std::iter::once(yazi_cli)
+            .chain(args.iter().map(String::as_str))
+            .collect::<Vec<_>>();
+        run_command_with_env_variables_and_cwd(
+            &command,
+            get_session_environment_variables(),
+            self.runtime_dir.clone(),
+            BTreeMap::new(),
+        );
     }
 }
 
